@@ -117,6 +117,56 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (event_id) REFERENCES events(id)
   );
+
+  CREATE TABLE IF NOT EXISTS followers (
+    follower_id TEXT NOT NULL,
+    following_id TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (follower_id, following_id),
+    FOREIGN KEY (follower_id) REFERENCES users(id),
+    FOREIGN KEY (following_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS communities (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    image TEXT,
+    creator_id TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (creator_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS community_members (
+    community_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role TEXT CHECK(role IN ('member', 'admin', 'moderator')) DEFAULT 'member',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (community_id, user_id),
+    FOREIGN KEY (community_id) REFERENCES communities(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS community_posts (
+    id TEXT PRIMARY KEY,
+    community_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    image TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (community_id) REFERENCES communities(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS community_messages (
+    id TEXT PRIMARY KEY,
+    community_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (community_id) REFERENCES communities(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
 `);
 
 // Seed categories if empty
@@ -135,48 +185,52 @@ if (categoryCount.count === 0) {
   categories.forEach(cat => insertCategory.run(...cat));
 }
 
-// Seed test users if they don't exist
-const testUsers = [
-  ['admin-id', 'Admin User', 'admin@eventhub.com', 'admin123', 'admin', null, 1],
-  ['host-id', 'Host User', 'host@eventhub.com', 'host123', 'host', 'Event Masters', 1],
-  ['student-id', 'Student User', 'student@eventhub.com', 'student123', 'student', null, 0]
-];
+// Seed sample communities if empty
+const communityCount = db.prepare('SELECT COUNT(*) as count FROM communities').get() as { count: number };
+if (communityCount.count === 0) {
+  const insertCommunity = db.prepare('INSERT INTO communities (id, name, description, image, creator_id) VALUES (?, ?, ?, ?, ?)');
+  const insertMember = db.prepare('INSERT INTO community_members (community_id, user_id, role) VALUES (?, ?, ?)');
+  
+  const sampleCommunities = [
+    ['c1', 'Tech Innovators', 'A community for developers, designers, and tech enthusiasts to share knowledge and collaborate.', 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&q=80', 'host-id'],
+    ['c2', 'Music Lovers', 'Connect with fellow music fans, share playlists, and discuss the latest concerts.', 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&q=80', 'student-id'],
+    ['c3', 'Campus Athletes', 'The official community for university sports teams and fitness enthusiasts.', 'https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&q=80', 'admin-id']
+  ];
 
-const checkUser = db.prepare('SELECT id FROM users WHERE email = ?');
-const insertUser = db.prepare('INSERT INTO users (id, name, email, password, role, host_org_name, host_verified) VALUES (?, ?, ?, ?, ?, ?, ?)');
-
-testUsers.forEach(user => {
-  const existing = checkUser.get(user[2]);
-  if (!existing) {
-    insertUser.run(...user);
-  }
-});
-
-// Clear user-generated data for a clean testing environment
-db.exec(`
-  DELETE FROM bookings;
-  DELETE FROM reviews;
-  DELETE FROM discussions;
-  DELETE FROM ticket_types;
-  DELETE FROM events;
-  DELETE FROM faqs;
-  DELETE FROM reports;
-  DELETE FROM users WHERE email NOT IN ('admin@eventhub.com', 'host@eventhub.com', 'student@eventhub.com');
-`);
+  sampleCommunities.forEach(comm => {
+    insertCommunity.run(...comm);
+    insertMember.run(comm[0], comm[4], 'admin');
+  });
+}
 
 // Seed sample events
-const eventCount = db.prepare('SELECT COUNT(*) as count FROM events').get() as { count: number };
-if (eventCount.count === 0) {
+// Seed test users if they don't exist
+const testUsers = [
+    ['admin-id', 'Admin User', 'admin@eventhub.com', 'admin123', 'admin', null, 1],
+    ['host-id', 'Host User', 'host@eventhub.com', 'host123', 'host', 'Event Masters', 1],
+    ['student-id', 'Student User', 'student@eventhub.com', 'student123', 'student', null, 0]
+  ];
+
+  const checkUser = db.prepare('SELECT id FROM users WHERE email = ?');
+  const insertUser = db.prepare('INSERT INTO users (id, name, email, password, role, host_org_name, host_verified) VALUES (?, ?, ?, ?, ?, ?, ?)');
+
+  testUsers.forEach(user => {
+    const existing = checkUser.get(user[2]);
+    if (!existing) {
+      insertUser.run(...user);
+    }
+  });
+
   const insertEvent = db.prepare(`
-    INSERT INTO events (id, host_id, name, description, date, venue, category_id, image, status, featured, total_seats, available_seats)
+    INSERT OR IGNORE INTO events (id, host_id, name, description, date, venue, category_id, image, status, featured, total_seats, available_seats)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertTicket = db.prepare(`
-    INSERT INTO ticket_types (id, event_id, name, price, quantity, sold)
+    INSERT OR IGNORE INTO ticket_types (id, event_id, name, price, quantity, sold)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
   const insertFaq = db.prepare(`
-    INSERT INTO faqs (id, event_id, question, answer)
+    INSERT OR IGNORE INTO faqs (id, event_id, question, answer)
     VALUES (?, ?, ?, ?)
   `);
 
@@ -192,7 +246,8 @@ if (eventCount.count === 0) {
     ['e4', 'host-id', 'International Food Expo', 'Taste cuisines from around the world in one place.', nextMonth, 'Expo Center, Chicago', '6', 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&q=80', 'approved', 1, 300, 300],
     ['e5', 'host-id', 'Future of AI Workshop', 'Hands-on workshop on the latest AI technologies.', nextWeek, 'Tech Lab, Boston', '1', 'https://images.unsplash.com/photo-1677442136019-21780ecad995?auto=format&fit=crop&q=80', 'approved', 0, 50, 50],
     ['e6', 'host-id', 'Modern Art Exhibition', 'Explore contemporary masterpieces from local artists.', nextMonth, 'City Gallery, San Francisco', '4', 'https://images.unsplash.com/photo-1547826039-bfc35e0f1ea8?auto=format&fit=crop&q=80', 'approved', 0, 200, 200],
-    ['e7', 'host-id', 'Championship Finals', 'The ultimate showdown in college basketball.', nextYear, 'Grand Stadium, Houston', '3', 'https://images.unsplash.com/photo-1504450758481-7338eba7524a?auto=format&fit=crop&q=80', 'approved', 1, 5000, 5000]
+    ['e7', 'host-id', 'Championship Finals', 'The ultimate showdown in college basketball.', nextYear, 'Grand Stadium, Houston', '3', 'https://images.unsplash.com/photo-1504450758481-7338eba7524a?auto=format&fit=crop&q=80', 'approved', 1, 5000, 5000],
+    ['e8', 'host-id', 'Academic Excellence Seminar', 'Learn effective study techniques and research methodologies.', nextWeek, 'University Hall, Room 302', '7', 'https://images.unsplash.com/photo-1523050335392-9bef867a0578?auto=format&fit=crop&q=80', 'approved', 0, 150, 150]
   ];
 
   sampleEvents.forEach(event => {
@@ -205,6 +260,5 @@ if (eventCount.count === 0) {
     insertFaq.run(`f-${event[0]}-1`, event[0], 'Is there parking available?', 'Yes, free parking is available on-site.');
     insertFaq.run(`f-${event[0]}-2`, event[0], 'Can I get a refund?', 'Refunds are available up to 48 hours before the event.');
   });
-}
 
 export default db;

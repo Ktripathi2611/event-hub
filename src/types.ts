@@ -16,6 +16,7 @@ export interface Category {
   name: string;
   icon: string;
   color: string;
+  event_count?: number;
 }
 
 export interface TicketType {
@@ -79,5 +80,44 @@ export interface Review {
   event_id: string;
   rating: number;
   comment: string;
+  created_at: string;
+}
+
+export interface Community {
+  id: string;
+  name: string;
+  description: string;
+  image?: string;
+  creator_id: string;
+  creator_name?: string;
+  member_count?: number;
+  created_at: string;
+}
+
+export interface CommunityMember {
+  id: string;
+  name: string;
+  avatar?: string;
+  role: 'member' | 'admin' | 'moderator';
+}
+
+export interface CommunityPost {
+  id: string;
+  community_id: string;
+  user_id: string;
+  user_name?: string;
+  user_avatar?: string;
+  content: string;
+  image?: string;
+  created_at: string;
+}
+
+export interface CommunityMessage {
+  id: string;
+  community_id: string;
+  user_id: string;
+  user_name?: string;
+  user_avatar?: string;
+  message: string;
   created_at: string;
 }

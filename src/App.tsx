@@ -24,12 +24,13 @@ import {
   ShieldCheck,
   Edit3,
   ArrowRight,
+  Send,
   Sun,
   Moon,
   Upload
 } from 'lucide-react';
 import { motion, AnimatePresence, useScroll, useTransform, useSpring } from 'motion/react';
-import { User as UserType, Event as EventType, Category, Booking, TicketType } from './types';
+import { User as UserType, Event as EventType, Category, Booking, TicketType, Community, CommunityMember, CommunityPost, CommunityMessage } from './types';
 
 // --- Theme Context ---
 const ThemeContext = React.createContext({
@@ -213,6 +214,7 @@ const Navbar = ({ user, onLogout }: { user: UserType | null, onLogout: () => voi
   const navLinks = [
     { name: 'Events', path: '/events', icon: Calendar },
     { name: 'Categories', path: '/categories', icon: TrendingUp },
+    { name: 'Communities', path: '/communities', icon: MessageSquare },
   ];
 
   if (user) {
@@ -496,6 +498,9 @@ const Home = () => {
               <Link to={`/events?category=${cat.id}`} className="group relative aspect-square rounded-[2rem] overflow-hidden glass-card flex flex-col items-center justify-center p-8">
                 <div className="text-5xl mb-6 group-hover:scale-110 transition-transform duration-500">{cat.icon}</div>
                 <div className="font-display font-bold text-lg uppercase tracking-tight">{cat.name}</div>
+                <div className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {cat.event_count || 0} Events
+                </div>
                 <div className="absolute bottom-6 opacity-0 group-hover:opacity-100 transition-opacity">
                   <ArrowRight className="w-5 h-5 text-brand-500" />
                 </div>
@@ -632,15 +637,120 @@ const Events = () => {
   );
 };
 
+const UserProfile = ({ user }: { user: UserType | null }) => {
+  const { id } = useParams();
+  const [profileUser, setProfileUser] = useState<UserType | null>(null);
+  const [followers, setFollowers] = useState<UserType[]>([]);
+  const [following, setFollowing] = useState<UserType[]>([]);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      const [userRes, followersRes, followingRes] = await Promise.all([
+        fetch(`/api/users/${id}`),
+        fetch(`/api/users/${id}/followers`),
+        fetch(`/api/users/${id}/following`)
+      ]);
+      if (userRes.ok) {
+        const u = await userRes.json();
+        setProfileUser(u);
+        const fers = await followersRes.json();
+        const fing = await followingRes.json();
+        setFollowers(fers);
+        setFollowing(fing);
+        setIsFollowing(fers.some((f: UserType) => f.id === user?.id));
+      }
+      setLoading(false);
+    };
+    fetchProfile();
+  }, [id, user]);
+
+  const handleFollow = async () => {
+    if (!user) return;
+    const method = isFollowing ? 'DELETE' : 'POST';
+    const res = await fetch(`/api/users/${id}/follow`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ followerId: user.id })
+    });
+    if (res.ok) {
+      setIsFollowing(!isFollowing);
+      const followersRes = await fetch(`/api/users/${id}/followers`);
+      setFollowers(await followersRes.json());
+    }
+  };
+
+  if (loading) return <div className="pt-40 text-center micro-label">Loading Profile...</div>;
+  if (!profileUser) return <div className="pt-40 text-center micro-label">User not found</div>;
+
+  return (
+    <div className="pt-40 pb-32 max-w-5xl mx-auto px-6 lg:px-12">
+      <div className="flex flex-col md:flex-row items-start md:items-center gap-12 mb-24">
+        <div className="w-32 h-32 rounded-full bg-white/5 flex items-center justify-center border border-white/10 shadow-2xl overflow-hidden">
+          {profileUser.avatar ? <img src={profileUser.avatar} alt={profileUser.name} className="w-full h-full object-cover" /> : <User className="w-16 h-16 text-[var(--text-secondary)]" />}
+        </div>
+        <div className="flex-1">
+          <div className="micro-label mb-4">{profileUser.role} Profile</div>
+          <h1 className="font-display font-bold text-5xl md:text-7xl tracking-tighter uppercase mb-6">{profileUser.name}</h1>
+          <div className="flex flex-wrap items-center gap-8">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-xl">{followers.length}</span>
+              <span className="micro-label">Followers</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-xl">{following.length}</span>
+              <span className="micro-label">Following</span>
+            </div>
+            {user && user.id !== profileUser.id && (
+              <button 
+                onClick={handleFollow}
+                className={`px-8 py-3 rounded-xl font-bold uppercase tracking-widest text-xs transition-all ${
+                  isFollowing 
+                  ? 'bg-white/5 text-white border border-white/10 hover:bg-rose-500/10 hover:border-rose-500/20 hover:text-rose-500' 
+                  : 'bg-brand-500 text-white shadow-lg shadow-brand-500/20'
+                }`}
+              >
+                {isFollowing ? 'Unfollow' : 'Follow'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="glass p-12 rounded-[3rem] border border-[var(--line-color)]">
+        <h2 className="font-display font-bold text-3xl mb-8 uppercase tracking-tight">About</h2>
+        <p className="text-lg text-[var(--text-secondary)] leading-relaxed italic">
+          {profileUser.bio || "This user hasn't shared a bio yet."}
+        </p>
+      </div>
+    </div>
+  );
+};
+
 const Profile = ({ user, onUpdate }: { user: UserType | null, onUpdate: (u: UserType) => void }) => {
   const [name, setName] = useState(user?.name || '');
   const [bio, setBio] = useState(user?.bio || '');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [followers, setFollowers] = useState<UserType[]>([]);
+  const [following, setFollowing] = useState<UserType[]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!user) navigate('/login');
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+    const fetchStats = async () => {
+      const [fersRes, fingRes] = await Promise.all([
+        fetch(`/api/users/${user.id}/followers`),
+        fetch(`/api/users/${user.id}/following`)
+      ]);
+      setFollowers(await fersRes.json());
+      setFollowing(await fingRes.json());
+    };
+    fetchStats();
   }, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -665,90 +775,96 @@ const Profile = ({ user, onUpdate }: { user: UserType | null, onUpdate: (u: User
   return (
     <div className="pt-40 pb-32 max-w-5xl mx-auto px-6 lg:px-12">
       <div className="flex flex-col md:flex-row items-start md:items-center gap-12 mb-24">
-        <div className="w-32 h-32 rounded-full bg-white/5 flex items-center justify-center border border-white/10 shadow-2xl relative group">
-          <User className="w-16 h-16 text-[var(--text-secondary)] group-hover:text-brand-500 transition-colors" />
-          <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-brand-500 rounded-full flex items-center justify-center border-4 border-[var(--bg-color)]">
-            <Award className="w-5 h-5 text-white" />
-          </div>
+        <div className="w-32 h-32 rounded-full bg-white/5 flex items-center justify-center border border-white/10 shadow-2xl overflow-hidden">
+          {user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" /> : <User className="w-16 h-16 text-[var(--text-secondary)]" />}
         </div>
-        <div>
-          <div className="micro-label mb-4">Account Profile</div>
-          <h1 className="font-display font-bold text-5xl md:text-7xl tracking-tighter uppercase mb-4">{user.name}</h1>
-          <div className="flex items-center gap-6">
-            <span className="px-4 py-1.5 bg-white/5 rounded-full text-[10px] font-bold uppercase tracking-widest text-brand-500 border border-brand-500/20">
-              {user.role}
-            </span>
-            <span className="micro-label">Member since {new Date(user.created_at).getFullYear()}</span>
+        <div className="flex-1">
+          <div className="micro-label mb-4">Your Profile</div>
+          <h1 className="font-display font-bold text-5xl md:text-7xl tracking-tighter uppercase mb-6">{user.name}</h1>
+          <div className="flex items-center gap-8">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-xl">{followers.length}</span>
+              <span className="micro-label">Followers</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-xl">{following.length}</span>
+              <span className="micro-label">Following</span>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-16">
-        <div className="lg:col-span-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
+        <div className="lg:col-span-2 space-y-12">
           <div className="glass p-12 rounded-[3rem] border border-[var(--line-color)]">
-            <h2 className="font-display font-bold text-3xl mb-12 uppercase tracking-tight flex items-center gap-4">
-              <Edit3 className="w-8 h-8 text-brand-500" /> Personal Details
-            </h2>
-            
-            {message && <div className="p-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-sm rounded-2xl mb-12 flex items-center gap-3">
-              <CheckCircle className="w-5 h-5" /> {message}
-            </div>}
-
-            <form onSubmit={handleSubmit} className="space-y-10">
+            <h2 className="font-display font-bold text-3xl mb-8 uppercase tracking-tight">Edit Profile</h2>
+            <form onSubmit={handleSubmit} className="space-y-8">
               <div>
-                <label className="micro-label mb-4 block">Display Name</label>
-                <input 
-                  type="text" 
-                  className="input-luxury"
+                <label className="micro-label mb-3 block">Full Name</label>
+                <input
+                  type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 focus:outline-none focus:border-brand-500 transition-colors text-lg"
+                  required
                 />
               </div>
               <div>
-                <label className="micro-label mb-4 block">Bio</label>
-                <textarea 
-                  rows={5}
-                  placeholder="Tell us about yourself..."
-                  className="input-luxury resize-none"
+                <label className="micro-label mb-3 block">Bio</label>
+                <textarea
                   value={bio}
                   onChange={(e) => setBio(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 focus:outline-none focus:border-brand-500 transition-colors text-lg h-32 resize-none"
+                  placeholder="Tell us about yourself..."
                 />
               </div>
-              <button type="submit" disabled={loading} className="btn-luxury px-16 py-4">
-                {loading ? 'Saving...' : 'Update Profile'}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-white text-black font-bold uppercase tracking-widest py-5 rounded-2xl hover:bg-brand-500 hover:text-white transition-all disabled:opacity-50"
+              >
+                {loading ? 'Saving...' : 'Save Changes'}
               </button>
+              {message && <p className="text-center micro-label text-brand-500">{message}</p>}
             </form>
           </div>
         </div>
 
-        <div className="space-y-8">
-          <div className="glass p-10 rounded-[2.5rem] border border-[var(--line-color)]">
-            <div className="micro-label mb-8">Statistics</div>
-            <div className="space-y-6">
-              <div className="flex items-center justify-between pb-6 border-b border-[var(--line-color)]">
-                <span className="text-[var(--text-secondary)] text-sm font-medium">Role</span>
-                <span className="font-bold uppercase tracking-tight text-sm">{user.role}</span>
-              </div>
-              {user.role === 'host' && (
-                <div className="flex items-center justify-between pb-6 border-b border-[var(--line-color)]">
-                  <span className="text-[var(--text-secondary)] text-sm font-medium">Organization</span>
-                  <span className="font-bold uppercase tracking-tight text-sm">{user.host_org_name}</span>
-                </div>
+        <div className="space-y-12">
+          <div className="glass p-8 rounded-[2rem] border border-[var(--line-color)]">
+            <h3 className="micro-label mb-6">Following</h3>
+            <div className="space-y-4">
+              {following.length > 0 ? following.map(f => (
+                <Link key={f.id} to={`/users/${f.id}`} className="flex items-center gap-4 group">
+                  <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                    {f.avatar ? <img src={f.avatar} alt={f.name} className="w-full h-full object-cover" /> : <User className="w-5 h-5" />}
+                  </div>
+                  <span className="text-sm font-medium group-hover:text-brand-500 transition-colors">{f.name}</span>
+                </Link>
+              )) : (
+                <p className="text-xs text-[var(--text-secondary)] italic">Not following anyone yet.</p>
               )}
-              <div className="flex items-center justify-between">
-                <span className="text-[var(--text-secondary)] text-sm font-medium">Status</span>
-                <span className="px-3 py-1 bg-emerald-500/10 text-emerald-500 text-[10px] font-bold uppercase rounded-full border border-emerald-500/20">Active</span>
-              </div>
             </div>
           </div>
-          
-          <div className="glass p-10 rounded-[2.5rem] border border-[var(--line-color)] bg-linear-to-br from-brand-500/5 to-transparent">
-            <Award className="w-10 h-10 text-brand-500 mb-6" />
-            <h3 className="font-display font-bold text-xl uppercase tracking-tight mb-4">Campus Legend</h3>
-            <p className="text-sm text-[var(--text-secondary)] leading-relaxed">You've joined the EventHub elite. Attend more events to unlock exclusive rewards and badges.</p>
+
+          <div className="glass p-8 rounded-[2rem] border border-[var(--line-color)]">
+            <h3 className="micro-label mb-6">Followers</h3>
+            <div className="space-y-4">
+              {followers.length > 0 ? followers.map(f => (
+                <Link key={f.id} to={`/users/${f.id}`} className="flex items-center gap-4 group">
+                  <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
+                    {f.avatar ? <img src={f.avatar} alt={f.name} className="w-full h-full object-cover" /> : <User className="w-5 h-5" />}
+                  </div>
+                  <span className="text-sm font-medium group-hover:text-brand-500 transition-colors">{f.name}</span>
+                </Link>
+              )) : (
+                <p className="text-xs text-[var(--text-secondary)] italic">No followers yet.</p>
+              )}
+            </div>
           </div>
         </div>
       </div>
+
     </div>
   );
 };
@@ -1616,6 +1732,574 @@ const AdminDashboard = ({ user }: { user: UserType | null }) => {
   );
 };
 
+const Categories = () => {
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    fetch('/api/categories')
+      .then(res => res.json())
+      .then(data => {
+        setCategories(data);
+        setLoading(false);
+      });
+  }, []);
+
+  const filteredCategories = categories.filter(c => 
+    c.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (loading) {
+    return (
+      <div className="pt-40 px-6 lg:px-12 max-w-7xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-8">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+            <Skeleton key={i} className="aspect-square rounded-[3rem]" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pt-40 pb-32 max-w-7xl mx-auto px-6 lg:px-12">
+      <div className="mb-24">
+        <div className="micro-label mb-6">Explore</div>
+        <h1 className="editorial-title mb-16">Event <span className="italic font-serif normal-case font-normal text-brand-500">Categories</span></h1>
+        
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-12">
+          <p className="text-[var(--text-secondary)] text-xl max-w-2xl font-medium leading-relaxed">
+            From high-energy festivals to focused workshops, find the perfect category that matches your interest.
+          </p>
+          <div className="relative group w-full md:w-96">
+            <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-secondary)] group-focus-within:text-brand-500 transition-colors" />
+            <input 
+              type="text" 
+              placeholder="Search categories..." 
+              className="input-luxury pl-16 py-4 text-sm"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+        {filteredCategories.map((cat, i) => (
+          <motion.div
+            key={cat.id}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.1 }}
+          >
+            <Link 
+              to={`/events?category=${cat.id}`}
+              className="group relative block h-80 glass rounded-[3rem] overflow-hidden border border-[var(--line-color)] hover:border-brand-500/30 transition-all duration-500 shadow-2xl"
+            >
+              <div className="absolute inset-0 bg-linear-to-br from-brand-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              
+              <div className="relative h-full p-12 flex flex-col justify-between">
+                <div className="flex items-start justify-between">
+                  <div className="text-6xl group-hover:scale-110 transition-transform duration-500">{cat.icon}</div>
+                  {cat.event_count && cat.event_count >= 2 && (
+                    <span className="px-4 py-1.5 bg-brand-500 text-white text-[10px] font-bold uppercase tracking-widest rounded-full shadow-lg shadow-brand-500/20">
+                      Trending
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <h3 className="font-display font-bold text-3xl mb-4 tracking-tight uppercase group-hover:text-brand-500 transition-colors">
+                    {cat.name}
+                  </h3>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[var(--text-secondary)] text-sm font-bold uppercase tracking-widest">
+                      {cat.event_count || 0} Events
+                    </span>
+                    <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center group-hover:bg-brand-500 group-hover:text-white transition-all duration-500">
+                      <ArrowRight className="w-6 h-6" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Link>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const Communities = ({ user }: { user: UserType | null }) => {
+  const [communities, setCommunities] = useState<Community[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [formData, setFormData] = useState({ name: '', description: '', image: '' });
+
+  useEffect(() => {
+    fetch('/api/communities')
+      .then(res => res.json())
+      .then(data => {
+        setCommunities(data);
+        setLoading(false);
+      });
+  }, []);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    const res = await fetch('/api/communities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...formData, creatorId: user.id })
+    });
+    if (res.ok) {
+      const newCommunity = await res.json();
+      setCommunities([...communities, { ...newCommunity, creator_name: user.name, member_count: 1, created_at: new Date().toISOString() } as Community]);
+      setShowCreate(false);
+      setFormData({ name: '', description: '', image: '' });
+    }
+  };
+
+  return (
+    <div className="pt-40 pb-32 max-w-7xl mx-auto px-6 lg:px-12">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-12 mb-24">
+        <div>
+          <div className="micro-label mb-6">Social</div>
+          <h1 className="editorial-title mb-16">Campus <span className="italic font-serif normal-case font-normal text-brand-500">Communities</span></h1>
+          <p className="text-[var(--text-secondary)] text-xl max-w-2xl font-medium leading-relaxed">
+            Join groups of like-minded students, share experiences, and stay updated on niche interests.
+          </p>
+        </div>
+        {user && (
+          <button onClick={() => setShowCreate(true)} className="btn-luxury px-10 py-4 flex items-center gap-3">
+            <Plus className="w-5 h-5" /> Create Community
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+        {communities.map((comm, i) => (
+          <motion.div
+            key={comm.id}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.1 }}
+          >
+            <Link 
+              to={`/communities/${comm.id}`}
+              className="group relative block h-96 glass rounded-[3rem] overflow-hidden border border-[var(--line-color)] hover:border-brand-500/30 transition-all duration-500 shadow-2xl"
+            >
+              <div className="absolute inset-0">
+                <img 
+                  src={comm.image || `https://picsum.photos/seed/${comm.id}/800/600`} 
+                  alt={comm.name}
+                  className="w-full h-full object-cover opacity-30 group-hover:opacity-50 transition-opacity duration-700"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-linear-to-t from-[var(--bg-color)] via-[var(--bg-color)]/80 to-transparent" />
+              </div>
+              
+              <div className="relative h-full p-12 flex flex-col justify-end">
+                <div className="mb-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="px-3 py-1 bg-brand-500/10 text-brand-500 text-[10px] font-bold uppercase tracking-widest rounded-full border border-brand-500/20">
+                      {comm.member_count} Members
+                    </span>
+                  </div>
+                  <h3 className="font-display font-bold text-3xl mb-4 tracking-tight uppercase group-hover:text-brand-500 transition-colors">
+                    {comm.name}
+                  </h3>
+                  <p className="text-[var(--text-secondary)] text-sm line-clamp-2 mb-8">
+                    {comm.description}
+                  </p>
+                </div>
+                <div className="flex items-center justify-between pt-8 border-t border-white/5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                      <User className="w-4 h-4 text-[var(--text-secondary)]" />
+                    </div>
+                    <span className="text-xs text-[var(--text-secondary)]">By {comm.creator_name}</span>
+                  </div>
+                  <div className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center group-hover:bg-brand-500 group-hover:text-white transition-all duration-500">
+                    <ArrowRight className="w-5 h-5" />
+                  </div>
+                </div>
+              </div>
+            </Link>
+          </motion.div>
+        ))}
+      </div>
+
+      <AnimatePresence>
+        {showCreate && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCreate(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-xl"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-2xl glass p-12 rounded-[3rem] border border-white/10 shadow-3xl"
+            >
+              <h2 className="font-display font-bold text-4xl mb-12 uppercase tracking-tight">Create Community</h2>
+              <form onSubmit={handleCreate} className="space-y-8">
+                <div>
+                  <label className="micro-label mb-4 block">Community Name</label>
+                  <input 
+                    type="text" 
+                    required
+                    className="input-luxury"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="micro-label mb-4 block">Description</label>
+                  <textarea 
+                    rows={4}
+                    required
+                    className="input-luxury resize-none"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="micro-label mb-4 block">Cover Image URL</label>
+                  <input 
+                    type="url" 
+                    className="input-luxury"
+                    placeholder="https://..."
+                    value={formData.image}
+                    onChange={(e) => setFormData({ ...formData, image: e.target.value })}
+                  />
+                </div>
+                <div className="flex gap-6 pt-6">
+                  <button type="button" onClick={() => setShowCreate(false)} className="btn-outline-luxury flex-1 py-4">Cancel</button>
+                  <button type="submit" className="btn-luxury flex-1 py-4">Create Community</button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+const CommunityDetail = ({ user }: { user: UserType | null }) => {
+  const { id } = useParams();
+  const [community, setCommunity] = useState<Community | null>(null);
+  const [posts, setPosts] = useState<CommunityPost[]>([]);
+  const [messages, setMessages] = useState<CommunityMessage[]>([]);
+  const [members, setMembers] = useState<CommunityMember[]>([]);
+  const [isMember, setIsMember] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [postContent, setPostContent] = useState('');
+  const [chatMessage, setChatMessage] = useState('');
+  const [activeTab, setActiveTab] = useState<'feed' | 'chat'>('feed');
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const [commRes, postsRes, membersRes, messagesRes] = await Promise.all([
+        fetch(`/api/communities/${id}`),
+        fetch(`/api/communities/${id}/posts`),
+        fetch(`/api/communities/${id}/members`),
+        fetch(`/api/communities/${id}/messages`)
+      ]);
+      const commData = await commRes.json();
+      const postsData = await postsRes.json();
+      const membersData = await membersRes.json();
+      const messagesData = await messagesRes.json();
+
+      setCommunity(commData);
+      setPosts(postsData);
+      setMembers(membersData);
+      setMessages(messagesData);
+      setIsMember(membersData.some((m: CommunityMember) => m.id === user?.id));
+      setLoading(false);
+    };
+    fetchData();
+  }, [id, user]);
+
+  useEffect(() => {
+    if (isMember && user) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const socket = new WebSocket(`${protocol}//${window.location.host}?communityId=${id}&userId=${user.id}`);
+      socketRef.current = socket;
+
+      socket.onmessage = (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'new_message') {
+          setMessages(prev => [...prev, payload.data]);
+        }
+      };
+
+      return () => {
+        socket.close();
+      };
+    }
+  }, [id, isMember, user]);
+
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, activeTab]);
+
+  const handleJoinLeave = async () => {
+    if (!user) return;
+    const method = isMember ? 'DELETE' : 'POST';
+    const endpoint = isMember ? 'leave' : 'join';
+    const res = await fetch(`/api/communities/${id}/${endpoint}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id })
+    });
+    if (res.ok) {
+      setIsMember(!isMember);
+      // Refresh members
+      const membersRes = await fetch(`/api/communities/${id}/members`);
+      setMembers(await membersRes.json());
+    }
+  };
+
+  const handlePost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !postContent.trim()) return;
+    const res = await fetch(`/api/communities/${id}/posts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id, content: postContent })
+    });
+    if (res.ok) {
+      const newPost = await res.json();
+      setPosts([{ ...newPost, user_name: user.name, user_avatar: user.avatar, created_at: new Date().toISOString() } as CommunityPost, ...posts]);
+      setPostContent('');
+    }
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !chatMessage.trim()) return;
+    const res = await fetch(`/api/communities/${id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id, message: chatMessage })
+    });
+    if (res.ok) {
+      setChatMessage('');
+    }
+  };
+
+  if (loading) return <div className="pt-40 text-center micro-label">Loading Community...</div>;
+  if (!community) return <div className="pt-40 text-center micro-label">Community not found</div>;
+
+  return (
+    <div className="pt-40 pb-32 max-w-7xl mx-auto px-6 lg:px-12">
+      <div className="relative h-96 rounded-[4rem] overflow-hidden mb-20 border border-white/10 shadow-3xl">
+        <img 
+          src={community.image || `https://picsum.photos/seed/${community.id}/1920/1080`} 
+          alt={community.name}
+          className="w-full h-full object-cover"
+          referrerPolicy="no-referrer"
+        />
+        <div className="absolute inset-0 bg-linear-to-t from-[var(--bg-color)] via-[var(--bg-color)]/40 to-transparent" />
+        <div className="absolute bottom-16 left-16 right-16 flex flex-col md:flex-row md:items-end justify-between gap-12">
+          <div>
+            <div className="micro-label mb-4 text-white/80">Community</div>
+            <h1 className="font-display font-bold text-6xl md:text-8xl tracking-tighter uppercase text-white mb-6">{community.name}</h1>
+            <div className="flex items-center gap-8 text-white/60 text-sm font-medium">
+              <span className="flex items-center gap-2"><User className="w-4 h-4" /> {members.length} Members</span>
+              <span className="flex items-center gap-2"><Plus className="w-4 h-4" /> Created by {community.creator_name}</span>
+            </div>
+          </div>
+          {user && (
+            <button 
+              onClick={handleJoinLeave}
+              className={`px-12 py-5 rounded-2xl font-bold uppercase tracking-widest text-sm transition-all duration-500 ${
+                isMember 
+                ? 'bg-white/10 text-white border border-white/20 hover:bg-rose-500/20 hover:border-rose-500/30 hover:text-rose-500' 
+                : 'bg-brand-500 text-white shadow-xl shadow-brand-500/20 hover:scale-105 active:scale-95'
+              }`}
+            >
+              {isMember ? 'Leave Community' : 'Join Community'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-8 mb-12 border-b border-white/5 pb-6">
+        <button 
+          onClick={() => setActiveTab('feed')}
+          className={`micro-label transition-colors ${activeTab === 'feed' ? 'text-brand-500' : 'text-[var(--text-secondary)] hover:text-white'}`}
+        >
+          Discussion Feed
+        </button>
+        {isMember && (
+          <button 
+            onClick={() => setActiveTab('chat')}
+            className={`micro-label transition-colors ${activeTab === 'chat' ? 'text-brand-500' : 'text-[var(--text-secondary)] hover:text-white'}`}
+          >
+            Live Chat
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-20">
+        <div className="lg:col-span-2">
+          {activeTab === 'feed' ? (
+            <div className="space-y-12">
+              {isMember && (
+                <div className="glass p-10 rounded-[3rem] border border-white/10">
+                  <div className="micro-label mb-8">Share something</div>
+                  <form onSubmit={handlePost} className="space-y-6">
+                    <textarea 
+                      rows={3}
+                      placeholder="What's on your mind?"
+                      className="input-luxury resize-none"
+                      value={postContent}
+                      onChange={(e) => setPostContent(e.target.value)}
+                    />
+                    <div className="flex justify-end">
+                      <button type="submit" className="btn-luxury px-10 py-3 text-sm">Post to Community</button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              <div className="space-y-10">
+                <div className="micro-label">Recent Discussions</div>
+                {posts.length === 0 ? (
+                  <div className="text-center py-20 glass rounded-[3rem] border border-dashed border-white/10 text-[var(--text-secondary)]">
+                    No posts yet. Be the first to share!
+                  </div>
+                ) : (
+                  posts.map((post, i) => (
+                    <motion.div 
+                      key={post.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                      className="glass p-10 rounded-[3rem] border border-white/10"
+                    >
+                      <div className="flex items-center gap-4 mb-8">
+                        <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center border border-white/10 overflow-hidden">
+                          {post.user_avatar ? <img src={post.user_avatar} alt={post.user_name} className="w-full h-full object-cover" /> : <User className="w-6 h-6 text-[var(--text-secondary)]" />}
+                        </div>
+                        <div>
+                          <div className="font-bold uppercase tracking-tight text-sm">{post.user_name}</div>
+                          <div className="text-[var(--text-secondary)] text-[10px] uppercase tracking-widest">{new Date(post.created_at).toLocaleDateString()}</div>
+                        </div>
+                      </div>
+                      <p className="text-lg leading-relaxed mb-8 text-zinc-300">
+                        {post.content}
+                      </p>
+                      {post.image && (
+                        <img src={post.image} alt="Post content" className="w-full rounded-2xl mb-8 border border-white/5" referrerPolicy="no-referrer" />
+                      )}
+                      <div className="flex gap-6 pt-8 border-t border-white/5">
+                        <button className="flex items-center gap-2 text-[var(--text-secondary)] hover:text-brand-500 transition-colors text-xs font-bold uppercase tracking-widest">
+                          <MessageSquare className="w-4 h-4" /> Reply
+                        </button>
+                        <button className="flex items-center gap-2 text-[var(--text-secondary)] hover:text-brand-500 transition-colors text-xs font-bold uppercase tracking-widest">
+                          <TrendingUp className="w-4 h-4" /> Boost
+                        </button>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="glass rounded-[3rem] border border-white/10 h-[600px] flex flex-col overflow-hidden">
+              <div className="p-8 border-b border-white/5 bg-white/5">
+                <div className="micro-label">Community Chat</div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-8 space-y-6">
+                {messages.map((msg, i) => (
+                  <div key={msg.id} className={`flex flex-col ${msg.user_id === user?.id ? 'items-end' : 'items-start'}`}>
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-secondary)]">{msg.user_name}</span>
+                      <span className="text-[10px] text-zinc-600">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    <div className={`px-6 py-3 rounded-2xl text-sm max-w-[80%] ${
+                      msg.user_id === user?.id 
+                      ? 'bg-brand-500 text-white rounded-tr-none' 
+                      : 'bg-white/5 text-zinc-300 border border-white/10 rounded-tl-none'
+                    }`}>
+                      {msg.message}
+                    </div>
+                  </div>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+              <form onSubmit={handleSendMessage} className="p-8 border-t border-white/5 bg-white/5 flex gap-4">
+                <input 
+                  type="text"
+                  placeholder="Type a message..."
+                  className="input-luxury py-3"
+                  value={chatMessage}
+                  onChange={(e) => setChatMessage(e.target.value)}
+                />
+                <button type="submit" className="btn-luxury px-8 py-3">
+                  <Send className="w-5 h-5" />
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-12">
+          <div className="glass p-10 rounded-[3rem] border border-white/10">
+            <div className="micro-label mb-8">Community Info</div>
+            <p className="text-[var(--text-secondary)] text-sm leading-relaxed mb-10">
+              {community.description}
+            </p>
+            <div className="space-y-6">
+              <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest">
+                <span className="text-[var(--text-secondary)]">Members</span>
+                <span>{members.length}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest">
+                <span className="text-[var(--text-secondary)]">Founded</span>
+                <span>{new Date(community.created_at).getFullYear()}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass p-10 rounded-[3rem] border border-white/10">
+            <div className="micro-label mb-8">Members</div>
+            <div className="grid grid-cols-5 gap-4">
+              {members.slice(0, 15).map(member => (
+                <div key={member.id} className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden group relative cursor-pointer">
+                  {member.avatar ? <img src={member.avatar} alt={member.name} className="w-full h-full object-cover" /> : <User className="w-5 h-5 text-[var(--text-secondary)]" />}
+                  <div className="absolute inset-0 bg-brand-500/80 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span className="text-[8px] text-white font-bold uppercase text-center px-1">{member.name.split(' ')[0]}</span>
+                  </div>
+                </div>
+              ))}
+              {members.length > 15 && (
+                <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-bold text-[var(--text-secondary)]">
+                  +{members.length - 15}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const HostDashboard = ({ user }: { user: UserType | null }) => {
   const [events, setEvents] = useState<EventType[]>([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -2074,7 +2758,10 @@ export default function App() {
               <Route path="/profile" element={<Profile user={user} onUpdate={handleUpdateUser} />} />
               <Route path="/host/dashboard" element={<HostDashboard user={user} />} />
               <Route path="/admin/dashboard" element={<AdminDashboard user={user} />} />
-              <Route path="/categories" element={<div className="pt-40 text-center text-zinc-500">Categories Page (Coming Soon)</div>} />
+              <Route path="/categories" element={<Categories />} />
+              <Route path="/communities" element={<Communities user={user} />} />
+              <Route path="/communities/:id" element={<CommunityDetail user={user} />} />
+              <Route path="/users/:id" element={<UserProfile user={user} />} />
             </Routes>
           </main>
           

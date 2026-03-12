@@ -7,6 +7,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import fs from 'fs';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createServer } from 'http';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,6 +34,31 @@ const upload = multer({ storage });
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  const server = createServer(app);
+  const wss = new WebSocketServer({ server });
+
+  // WebSocket connection handling
+  const clients = new Map<string, Set<WebSocket>>();
+
+  wss.on('connection', (ws, req) => {
+    const url = new URL(req.url || '', `http://${req.headers.host}`);
+    const communityId = url.searchParams.get('communityId');
+    const userId = url.searchParams.get('userId');
+
+    if (communityId && userId) {
+      if (!clients.has(communityId)) {
+        clients.set(communityId, new Set());
+      }
+      clients.get(communityId)!.add(ws);
+
+      ws.on('close', () => {
+        clients.get(communityId)?.delete(ws);
+        if (clients.get(communityId)?.size === 0) {
+          clients.delete(communityId);
+        }
+      });
+    }
+  });
 
   app.use(express.json());
   app.use('/uploads', express.static(uploadDir));
@@ -316,8 +343,167 @@ async function startServer() {
 
   // Categories
   app.get('/api/categories', (req, res) => {
-    const categories = db.prepare('SELECT * FROM categories').all();
+    const categories = db.prepare(`
+      SELECT c.*, COUNT(e.id) as event_count
+      FROM categories c
+      LEFT JOIN events e ON c.id = e.category_id AND e.status = 'approved'
+      GROUP BY c.id
+    `).all();
     res.json(categories);
+  });
+
+  // Followers
+  app.post('/api/users/:id/follow', (req, res) => {
+    const { followerId } = req.body;
+    const followingId = req.params.id;
+    try {
+      db.prepare('INSERT INTO followers (follower_id, following_id) VALUES (?, ?)').run(followerId, followingId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(400).json({ error: 'Already following or user not found' });
+    }
+  });
+
+  app.delete('/api/users/:id/follow', (req, res) => {
+    const { followerId } = req.body;
+    const followingId = req.params.id;
+    db.prepare('DELETE FROM followers WHERE follower_id = ? AND following_id = ?').run(followerId, followingId);
+    res.json({ success: true });
+  });
+
+  app.get('/api/users/:id/followers', (req, res) => {
+    const followers = db.prepare(`
+      SELECT u.id, u.name, u.avatar, u.role
+      FROM users u
+      JOIN followers f ON u.id = f.follower_id
+      WHERE f.following_id = ?
+    `).all(req.params.id);
+    res.json(followers);
+  });
+
+  app.get('/api/users/:id/following', (req, res) => {
+    const following = db.prepare(`
+      SELECT u.id, u.name, u.avatar, u.role
+      FROM users u
+      JOIN followers f ON u.id = f.following_id
+      WHERE f.follower_id = ?
+    `).all(req.params.id);
+    res.json(following);
+  });
+
+  // Communities
+  app.get('/api/communities', (req, res) => {
+    const communities = db.prepare(`
+      SELECT c.*, u.name as creator_name, (SELECT COUNT(*) FROM community_members WHERE community_id = c.id) as member_count
+      FROM communities c
+      JOIN users u ON c.creator_id = u.id
+    `).all();
+    res.json(communities);
+  });
+
+  app.post('/api/communities', (req, res) => {
+    const { name, description, image, creatorId } = req.body;
+    const id = uuidv4();
+    db.prepare('INSERT INTO communities (id, name, description, image, creator_id) VALUES (?, ?, ?, ?, ?)').run(id, name, description, image, creatorId);
+    // Creator automatically joins as admin
+    db.prepare('INSERT INTO community_members (community_id, user_id, role) VALUES (?, ?, ?)').run(id, creatorId, 'admin');
+    res.json({ id, name });
+  });
+
+  app.get('/api/communities/:id', (req, res) => {
+    const community = db.prepare(`
+      SELECT c.*, u.name as creator_name, (SELECT COUNT(*) FROM community_members WHERE community_id = c.id) as member_count
+      FROM communities c
+      JOIN users u ON c.creator_id = u.id
+      WHERE c.id = ?
+    `).get(req.params.id);
+    if (!community) return res.status(404).json({ error: 'Community not found' });
+    res.json(community);
+  });
+
+  app.post('/api/communities/:id/join', (req, res) => {
+    const { userId } = req.body;
+    const communityId = req.params.id;
+    try {
+      db.prepare('INSERT INTO community_members (community_id, user_id) VALUES (?, ?)').run(communityId, userId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(400).json({ error: 'Already a member' });
+    }
+  });
+
+  app.delete('/api/communities/:id/leave', (req, res) => {
+    const { userId } = req.body;
+    const communityId = req.params.id;
+    db.prepare('DELETE FROM community_members WHERE community_id = ? AND user_id = ?').run(communityId, userId);
+    res.json({ success: true });
+  });
+
+  app.get('/api/communities/:id/posts', (req, res) => {
+    const posts = db.prepare(`
+      SELECT p.*, u.name as user_name, u.avatar as user_avatar
+      FROM community_posts p
+      JOIN users u ON p.user_id = u.id
+      WHERE p.community_id = ?
+      ORDER BY p.created_at DESC
+    `).all(req.params.id);
+    res.json(posts);
+  });
+
+  app.post('/api/communities/:id/posts', (req, res) => {
+    const { userId, content, image } = req.body;
+    const communityId = req.params.id;
+    const id = uuidv4();
+    db.prepare('INSERT INTO community_posts (id, community_id, user_id, content, image) VALUES (?, ?, ?, ?, ?)').run(id, communityId, userId, content, image);
+    res.json({ id, content });
+  });
+
+  app.get('/api/communities/:id/members', (req, res) => {
+    const members = db.prepare(`
+      SELECT u.id, u.name, u.avatar, cm.role
+      FROM users u
+      JOIN community_members cm ON u.id = cm.user_id
+      WHERE cm.community_id = ?
+    `).all(req.params.id);
+    res.json(members);
+  });
+
+  app.get('/api/communities/:id/messages', (req, res) => {
+    const messages = db.prepare(`
+      SELECT m.*, u.name as user_name, u.avatar as user_avatar
+      FROM community_messages m
+      JOIN users u ON m.user_id = u.id
+      WHERE m.community_id = ?
+      ORDER BY m.created_at ASC
+    `).all(req.params.id);
+    res.json(messages);
+  });
+
+  app.post('/api/communities/:id/messages', (req, res) => {
+    const { userId, message } = req.body;
+    const communityId = req.params.id;
+    const id = uuidv4();
+    db.prepare('INSERT INTO community_messages (id, community_id, user_id, message) VALUES (?, ?, ?, ?)').run(id, communityId, userId, message);
+    
+    const fullMessage = db.prepare(`
+      SELECT m.*, u.name as user_name, u.avatar as user_avatar
+      FROM community_messages m
+      JOIN users u ON m.user_id = u.id
+      WHERE m.id = ?
+    `).get(id);
+
+    // Broadcast to WebSocket clients
+    const communityClients = clients.get(communityId);
+    if (communityClients) {
+      const payload = JSON.stringify({ type: 'new_message', data: fullMessage });
+      communityClients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(payload);
+        }
+      });
+    }
+
+    res.json(fullMessage);
   });
 
   // Vite middleware for development
@@ -334,7 +520,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
