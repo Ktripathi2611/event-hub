@@ -1,6 +1,3 @@
-<div align="center">
-<img width="1200" height="475" alt="Event Hub Banner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
 
 # 🚀 Event-Hub: Next-Gen Event & Community Platform
 
@@ -147,7 +144,7 @@ The application follows a standard Client-Server architecture:
 ## 🔑 Environment Variables
 | Variable | Description | Source |
 | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | Required for Gemini AI features. | [Google AI Studio](https://aistudio.google.com/) |
+| `GEMINI_API_KEY` | Required for Gemini AI features. | [Google AI](https://aistudio.google.com/) |
 | `APP_URL` | The public URL of the application. | Deployment specific |
 
 ---
