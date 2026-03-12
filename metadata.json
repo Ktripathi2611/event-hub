@@ -1,0 +1,5 @@
+{
+  "name": "EventHub",
+  "description": "A modern college event marketplace for students to discover and book tickets, and for hosts to manage campus events.",
+  "requestFramePermissions": []
+}
