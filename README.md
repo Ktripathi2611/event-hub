@@ -1,160 +1,242 @@
+# EventHub
 
-# 🚀 Event-Hub: Next-Gen Event & Community Platform
+EventHub is a premium event management and community engagement platform designed for campus environments. It streamlines the discovery, hosting, and booking of events while fostering vibrant student communities through real-time interaction and social features.
 
-Event-Hub is a comprehensive, full-stack application designed to streamline event management, community engagement, and social interaction. Built with a modern tech stack including React, Express, and SQLite, it features real-time messaging, secure booking with QR codes, and AI-powered enhancements.
+## Overview
+EventHub serves as a centralized hub for all things happening on campus. Whether it's a tech summit, a music festival, or a startup pitch night, EventHub provides the tools for hosts to organize and for students to experience the best moments of campus life.
 
----
+## Problem Statement
+Campus events are often fragmented across different social media platforms, emails, and physical posters, making it difficult for students to discover them and for hosts to manage ticket sales and attendee communication. EventHub solves this by providing:
+- A unified platform for event discovery.
+- Professional tools for event organizers.
+- Real-time community spaces for sustained engagement.
 
-## 📋 Table of Contents
-- [Project Overview](#project-overview)
-- [Directory Structure](#directory-structure)
-- [Key Files & Roles](#key-files--roles)
-- [Technology Stack](#technology-stack)
-- [Features](#features)
-- [Architecture & Workflow](#architecture--workflow)
-- [Setup & Installation](#setup--installation)
-- [Environment Variables](#environment-variables)
-- [Best Practices for Contribution](#best-practices-for-contribution)
+## Key Features
 
----
+### 👤 Multi-Role User System
+- **Students**: Browse events, follow hosts, join communities, and book tickets.
+- **Hosts**: Create and manage events, track ticket sales, and verify attendees.
+- **Admins**: oversee the platform, approve/reject event submissions, and manage reports.
 
-## 🌟 Project Overview
-Event-Hub provides a dual-interface for users: a student/attendee facing platform for discovering and booking events, and a host/admin dashboard for managing event lifecycles, communities, and moderation.
+### 📅 Advanced Event Management
+- **Approval Workflow**: All host-created events go through an admin review process.
+- **Dynamic Ticket Types**: Support for multiple ticket tiers (e.g., General Admission, VIP).
+- **FAQ System**: Hosts can provide event-specific information to potential attendees.
 
----
+### 🎟️ Seamless Booking & Verification
+- **QR Code Generation**: Every booking generates a unique QR code for easy check-in.
+- **Seat Management**: Real-time tracking of available seats and sold tickets.
 
-## 📂 Directory Structure
+### 🤝 Social & Community Features
+- **Communities**: Interest-based groups where users can post updates and chat.
+- **Real-time Messaging**: WebSocket-powered community chat for live interaction.
+- **Follow System**: Users can follow their favorite hosts and friends.
 
-```text
-event-hub/
-├── .env.example           # Template for environment variables
-├── .gitignore             # Standard git exclusion list
-├── db.ts                  # Database schema & initialization logic
-├── events.db              # SQLite database file (persistence layer)
-├── index.html             # Main entry point for the SPA
-├── package.json           # Project dependencies and scripts
-├── server.ts              # Express backend with WebSocket & API logic
-├── tsconfig.json          # TypeScript configuration
-├── vite.config.ts         # Vite build tool configuration
-├── public/                # Static assets
-│   └── uploads/           # User-uploaded images (events/profile)
-└── src/                   # Frontend source code
-    ├── App.tsx            # Main React application logic & routing
-    ├── main.tsx           # React entry point
-    ├── types.ts           # Shared TypeScript interfaces
-    └── index.css          # Global styles & Tailwind directives
-```
+### 🛡️ Moderation & Reporting
+- **Report System**: Users can report suspicious or inappropriate events.
+- **Admin Dashboard**: Centralized panel for managing pending events and user reports.
 
-### Directory Explained
-- **Root Directory**: Contains the core configuration files for both the build system (Vite) and the runtime environment (Node.js/Express).
-- **`src/`**: Houses the entire frontend application, including UI components, state management, and business logic.
-- **`public/uploads/`**: A persistent storage area for dynamic content like event posters and user avatars.
-
----
-
-## 🛠️ Key Files & Roles
-
-| File | Role | Key Functionality |
-| :--- | :--- | :--- |
-| `server.ts` | Backend Core | Handles API routes, WebSocket connections, and file uploads. |
-| `db.ts` | Data Layer | Defines the SQLite schema, initializes tables, and seeds sample data. |
-| `App.tsx` | Frontend Root | Manages application state, routing, and primary UI layout. |
-| `types.ts` | Type Safety | Defines unified interfaces for Users, Events, Bookings, and Communities. |
-| `vite.config.ts` | Build System | Configures React, Tailwind, and environment variable injection. |
-
----
-
-## 💻 Technology Stack
+## Tech Stack
 
 ### Frontend
-- **Framework**: [React 19](https://react.dev/)
-- **Build Tool**: [Vite](https://vitejs.dev/)
-- **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
-- **Animations**: [Motion](https://motion.dev/) (Framer Motion)
-- **Icons**: [Lucide React](https://lucide.dev/)
+- **React 19**: Modern UI library for building dynamic components.
+- **Tailwind CSS 4**: Next-generation utility-first CSS framework for premium aesthetics.
+- **Motion**: For smooth, high-end micro-animations and transitions.
+- **React Router 7**: Robust routing for a seamless Single Page Application experience.
+- **Lucide React**: Sleek, consistent iconography.
 
 ### Backend
-- **Runtime**: [Node.js](https://nodejs.org/) (via `tsx` in development)
-- **Framework**: [Express](https://expressjs.com/)
-- **Database**: [SQLite](https://www.sqlite.org/) (via [better-sqlite3](https://github.com/WiseLibs/node-better-sqlite3))
-- **Real-time**: [ws](https://github.com/websockets/ws) (WebSocket)
-- **File Handling**: [Multer](https://github.com/expressjs/multer)
+- **Express / Node.js**: Robust and scalable server infrastructure.
+- **tsx**: Modern TypeScript execution environment.
 
-### AI & Utilities
-- **AI Integration**: [@google/genai](https://www.npmjs.com/package/@google/genai) (Gemini AI)
-- **QR Codes**: [qrcode](https://www.npmjs.com/package/qrcode)
-- **ID Generation**: [uuid](https://www.npmjs.com/package/uuid)
+### Database
+- **SQLite (better-sqlite3)**: Fast, reliable, and lightweight relational database.
 
----
+### Real-time & Utilities
+- **WebSocket (ws)**: Enables real-time messaging in communities.
+- **QRCode**: Generates scannable codes for ticket verification.
+- **Multer**: Handles secure file and image uploads.
+- **UUID**: Ensures unique identification for all system entities.
+- **Google Generative AI**: Infrastructure ready for AI-enhanced features.
 
-## ✨ Features
-- **Event Lifecycle**: Create, approve, reject, and manage events with ease.
-- **Smart Booking**: Instant booking with automated QR code generation for ticket verification.
-- **Community Hubs**: Join professional or social communities, post content, and chat in real-time.
-- **Advanced Moderation**: Reporting system for events to ensure a safe environment.
-- **Dual Dashboard**: Separate views for Hosts (Event creators) and Admins (Platform moderators).
-- **Persistence**: Efficient data storage using a local SQLite database.
+## System Architecture
 
----
+EventHub follows a modern Client-Server architecture:
+1. **Frontend**: A React-based SPA that communicates with the API via JSON.
+2. **Backend**: An Express server handling business logic, authentication, and WebSocket connections.
+3. **Database**: A relational SQLite database for persistence, managed via `better-sqlite3`.
 
-## 🏗️ Architecture & Workflow
+```mermaid
+graph LR
+    User([User]) <--> React[React Frontend]
+    React <--> API[Express API]
+    API <--> DB[(SQLite DB)]
+    API <--> WS[WebSocket Server]
+    WS <--> React
+```
 
-### 1. Data Flow
-The application follows a standard Client-Server architecture:
-- **Client (React)** → Makes RESTful API calls to **Server (Express)**.
-- **Server** → Interacts with **Database (SQLite)** for persistence.
-- **Real-time Chat** → Uses **WebSockets** for instant message broadcasting across community members.
+## Installation Guide
 
-### 2. Dependencies
-- The frontend relies on types defined in `src/types.ts` to ensure consistency with backend responses.
-- `server.ts` depends on `db.ts` for database access and schema integrity.
-- File uploads are managed via `multer` and served statically through the `/uploads` route.
+Follow these steps to set up the project locally:
 
----
-
-## ⚙️ Setup & Installation
-
-### Prerequisites
-- Node.js (v18 or higher)
-- npm or yarn
-
-### Steps
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
    cd event-hub
    ```
+
 2. **Install dependencies**:
    ```bash
    npm install
    ```
-3. **Configure environment**:
-   Create a `.env` file based on `.env.example`:
-   ```bash
-   cp .env.example .env
-   ```
-4. **Start development server**:
+
+3. **Set up Environment Variables**:
+   Create a `.env` file in the root based on `.env.example`.
+
+4. **Start the development server**:
    ```bash
    npm run dev
    ```
-   *The app will be available at `http://localhost:3000`.*
+   The application will be available at `http://localhost:3000`.
+
+## Usage Guide
+
+1. **Discovery**: Use the home page or search bar to find events by name, category, or venue.
+2. **Authentication**: Register as a student or host. Roles determine your access to specific dashboards.
+3. **Booking**: Select an event, choose your ticket type, and confirm. Your QR code will be available in "My Bookings".
+4. **Community**: Join interest groups, participate in discussions, and message other members in real-time.
+5. **Hosting**: If you are a host, use the "Host Dashboard" to create events. Wait for admin approval to see them go live.
+
+## Folder Structure
+
+```text
+event-hub/
+├── public/          # Static assets and user uploads
+├── src/             # Frontend source code
+│   ├── App.tsx      # Main application logic and routing
+│   ├── main.tsx     # Entry point
+│   ├── types.ts     # TypeScript definitions
+│   └── index.css    # Global styles (Tailwind v4)
+├── db.ts            # Database schema and initialization
+├── server.ts        # Express server and API routes
+├── events.db        # SQLite database file
+└── package.json     # Project dependencies and scripts
+```
+
+## Configuration
+The project uses the following configuration files:
+- `vite.config.ts`: Vite build and server settings.
+- `tsconfig.json`: TypeScript compiler configuration.
+- `.env`: Environment variables for sensitive configuration.
+
+## Future Improvements
+- **Payment Integration**: Support for real-world transactions via Stripe or Razorpay.
+- **Cloud Storage**: Transitioning from local `/uploads` to AWS S3 or Google Cloud Storage.
+- **AI Recommendations**: Personalized event suggestions using user behavior and preferences.
+- **JWT Authentication**: Moving beyond session-like identification for improved security.
 
 ---
 
-## 🔑 Environment Variables
-| Variable | Description | Source |
-| :--- | :--- | :--- |
-| `GEMINI_API_KEY` | Required for Gemini AI features. | [Google AI](https://aistudio.google.com/) |
-| `APP_URL` | The public URL of the application. | Deployment specific |
+## Workflow & Algorithm Documentation
+
+### Main Booking Workflow
+1. **Selection**: User selects an event and ticket type.
+2. **Availability Check**: System verifies `available_seats` in the `events` table.
+3. **Transaction**:
+   - `INSERT` record into `bookings` table.
+   - `UPDATE` `ticket_types` to increment `sold`.
+   - `UPDATE` `events` to decrement `available_seats`.
+4. **Verification Generation**: System generates a unique `booking_ref` and converts it into a Base64 QR Code using the `qrcode` library.
+
+### Real-time Messaging Algorithm
+1. **Connection**: Frontend establishes a WebSocket connection with the `communityId` and `userId`.
+2. **Storage**: Server stores client connections in a `Map<string, Set<WebSocket>>` keyed by `communityId`.
+3. **Transmission**: When a message is posted to `/api/communities/:id/messages`:
+   - It is saved to the database.
+   - The server retrieves all WebSocket clients for that `communityId`.
+   - The message is broadcasted to all active clients in that set.
 
 ---
 
-## 🤝 Best Practices for Contribution
-1. **Type Safety**: Always update `src/types.ts` when modifying database schemas.
-2. **Component Isolation**: Keep React components modular and reusable under `src/components/` (if created).
-3. **API Consistency**: Follow the existing naming convention in `server.ts` (`/api/...`).
-4. **Clean Code**: Use descriptive variable names and document complex business logic.
-5. **Linting**: Run `npm run lint` before committing to check for TypeScript errors.
+## System Diagrams
 
----
-*Created and maintained by the Event-Hub Team.*
+### System Architecture Diagram
+```mermaid
+graph TD
+    subgraph Client
+        UI[React Router / SPA]
+        WS_Client[WS Client]
+    end
+
+    subgraph Server
+        express[Express Server]
+        WSS[WebSocket Server]
+        multer[Multer Uploads]
+    end
+
+    subgraph Infrastructure
+        sqlite[(SQLite / better-sqlite3)]
+        fs[File System / public/uploads]
+    end
+
+    UI --> express
+    WS_Client <--> WSS
+    express --> sqlite
+    express --> multer
+    multer --> fs
+```
+
+### Application Workflow Diagram
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant Backend
+    participant DB
+
+    User->>Frontend: Select Event & Book
+    Frontend->>Backend: POST /api/bookings
+    Backend->>DB: Check Availability
+    DB-->>Backend: Seats Available
+    Backend->>DB: INSERT booking, UPDATE seats
+    Backend->>Backend: Generate QR Code
+    Backend-->>Frontend: JSON { booking_ref, qrCode }
+    Frontend-->>User: Show Success & QR Code
+```
+
+### Data Flow Diagram (DFD)
+```mermaid
+flowchart LR
+    User((User)) -- Event Data/Review --> Process1[Event Management]
+    Process1 -- Store Event --> DB[(SQLite DB)]
+    DB -- Fetch Events --> Process1
+    Process1 -- Render View --> User
+
+    User -- Booking Request --> Process2[Booking Engine]
+    Process2 -- Verify/Update --> DB
+    Process2 -- QR Code --> User
+
+    User -- Chat Message --> Process3[Real-time Chat]
+    Process3 -- Broadcast --> WS[WebSocket Clients]
+    Process3 -- History --> DB
+```
+
+### Module Interaction Diagram
+```mermaid
+graph TD
+    App[App.tsx] --> Auth[Auth Module]
+    App --> EventMod[Event Module]
+    App --> CommMod[Community Module]
+    App --> AdminMod[Admin Dashboard]
+
+    EventMod --> Booking[Booking System]
+    Booking --> QR[QR Code Engine]
+    CommMod --> WS_Layer[WebSocket Layer]
+    AdminMod --> ModLayer[Moderation Layer]
+
+    Auth --> Storage[(Database)]
+    EventMod --> Storage
+    Booking --> Storage
+    CommMod --> Storage
+    ModLayer --> Storage
+```
