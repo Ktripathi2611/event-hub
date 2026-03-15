@@ -1,164 +1,99 @@
-# EventHub 🎫
+# EventHub
 
-[![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![SQLite](https://img.shields.io/badge/SQLite_3-07405E?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+EventHub is a comprehensive full-stack platform for discovering, hosting, and managing campus events, underground gigs, and tech summits. Built with React (Vite), Express, SQLite, and WebSockets, it provides real-time community messaging, ticketing, and event management features.
 
-EventHub is a modern, high-performance campus event marketplace designed for students and event organizers. It provides a seamless platform for discovering campus happenings, booking VIP or general tickets, and managing large-scale events with real-time host and admin dashboards.
+## Table of Contents
+- [Directory Structure](#directory-structure)
+- [Directory Explanations & Key Files](#directory-explanations--key-files)
+- [Dependencies & Architecture](#dependencies--architecture)
+- [Usage Notes & Setup](#usage-notes--setup)
+- [Best Practices & Contributing](#best-practices--contributing)
 
----
-
-## 🚀 Overview & Problem Statement
-
-University students often struggle to find engaging events on campus due to fragmented communication channels (flyers, emails, social media). Event organizers lack a unified platform to sell varied ticket tiers, track attendance, respond to FAQs, and gather reviews. **EventHub bridges this gap with an intuitive, centralized ecosystem.**
-
----
-
-## ✨ Key Features
-
-- **Multi-Role Authentication** (Students, Hosts, Admins): Selective dashboard rendering based on role validation.
-- **Event Discovery & Filtering**: Dynamic SQL querying to filter by category, date, and wildcard matches to venues.
-- **Automated QR Event Ticketing**: Every successful checkout generates a unique base64 QR Code using the `uuid` and `qrcode` libraries.
-- **Admin Approval Engine**: Newly created events wait in a `pending` state for quality control before going live on the platform.
-- **Review & Rating System**: Verified 1-to-5 star ratings for attendees to rate their campus experiences.
-
----
-
-## 🛠️ Technology Stack
-
-| Domain | Technologies |
-| :--- | :--- |
-| **Frontend** | React 19, React Router 7, Tailwind CSS 4, Framer Motion, Lucide React, Vite 6 |
-| **Backend** | Node.js, Express.js, TypeScript (via `tsx`) |
-| **Database** | SQLite (via `better-sqlite3` for synchronous I/O) |
-| **Utilities** | Multer (for local image uploads), `uuid`, `qrcode` |
-
----
-
-## ⚡ Quick Start
-
-### Prerequisites
-- **Node.js**: v18 or newer
-- **Git**
-
-### Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/your-org/event-hub.git
-   cd event-hub
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Configure the environment:**
-   ```bash
-   cp .env.example .env
-   ```
-
-4. **Run the development server:**
-   ```bash
-   npm run dev
-   ```
-   *(The Vite frontend, Express API, and SQLite DB will initialize concurrently on port 3000)*
-
----
-
-## 🧭 Usage Guide & Test Credentials
-
-Navigate to `http://localhost:3000`. Test the platform using our seeded accounts:
-
-| Role | Email | Password | Dashboard Access |
-| :--- | :--- | :--- | :--- |
-| **Admin** | `admin@eventhub.com` | `admin123` | Moderate pending events and manage reports. |
-| **Host** | `host@eventhub.com` | `host123` | Create events, define ticket tiers, and track sales. |
-| **Student** | `student@eventhub.com` | `student123` | Browse feeds, engage in FAQs, and book tickets. |
-
----
-
-## 🏗️ System Architecture & Workflows
-
-EventHub operates as a **Monolith**, serving both a RESTful JSON API and the React SPA. 
-
-### Core Logic & Execution
-- **Atomic Database Transactions:** Safe ACID transactional blocks manage critical paths (e.g., ticket checkouts). If `Insert Booking` succeeds but `Decrement Seats` fails, the transaction rolls back gracefully—preventing ghost tickets.
-- **Dynamic Event Querying:** Highly adaptable string-builder algorithms sanitize parameters to prevent SQL injection during search filtering.
-
-### System Architecture Diagram
-
-```mermaid
-flowchart TD
-    Client["React Frontend (Vite)"]
-    Router["Express Router (/api)"]
-    Core["Node.js Server Operations"]
-    FS["Local File System (public/uploads/)"]
-    DB[("SQLite Database")]
-
-    Client -- HTTP GET/POST --> Router
-    Router -- Request Body/Auth --> Core
-    Core -- Multer Image Processing --> FS
-    Core -- Parameterized SQL --> DB
-    DB -- Query Results --> Core
-    Core -- JSON Responses --> Client
-```
-
-### Event Booking Workflow (DFD)
-
-```mermaid
-flowchart TD
-    User((User)) -- Selects Ticket & Quantity --> Frontend("React App")
-    Frontend -- "POST /api/bookings" --> BookingAPI("Booking Endpoint")
-    
-    subgraph Express Backend
-        BookingAPI -- Validate --> Logic["Transaction Logic"]
-        Logic -- Read/Write --> SQLite[(SQLite DB)]
-        Logic -- Generate String --> QR["QR Code Generator"]
-    end
-    
-    SQLite -- Decrement Seats --> SQLite
-    SQLite -- Confirm Row --> Logic
-    Logic -- "{ qrCode, ticket_ref }" --> Frontend
-    Frontend -- "Renders Ticket Success UI" --> User
-```
-
----
-
-## 📂 Repository Mapping
+## Directory Structure
 
 ```text
 event-hub/
-├── db.ts               # SQLite schema definitions and seed data
-├── server.ts           # Express routing and Vite middleware
-├── public/uploads/     # Multer persistent storage for event banners
-└── src/
-    ├── App.tsx         # Central App router & monolithic UI container
-    ├── index.css       # Global design system & Tailwind layer
-    └── types.ts        # Shared TS interfaces (User, Event, Category)
+├── public/                 # Static assets and user uploads
+│   └── uploads/            # Auto-generated directory for uploaded event/profile images
+├── src/                    # Frontend React application source code
+│   ├── App.tsx             # Main React component containing routes, pages, and UI logic
+│   ├── index.css           # Global Tailwind CSS and custom design system styles
+│   ├── main.tsx            # React application entry point
+│   └── types.ts            # TypeScript interfaces for shared data models (User, Event, etc.)
+├── .env.example            # Environment variables template
+├── .gitignore              # Git ignored files and directories
+├── db.ts                   # Database configuration, schema definitions, and seeding logic
+├── events.db               # SQLite database file (generated on runtime)
+├── index.html              # Base HTML template for the Vite React app
+├── package.json            # Project dependencies, metadata, and npm scripts
+├── server.ts               # Express backend server and WebSocket implementation
+├── tsconfig.json           # TypeScript compiler configuration
+└── vite.config.ts          # Vite bundler configuration
 ```
 
----
+## Directory Explanations & Key Files
 
-## 🚢 Deployment
+### Root Directory
+The root directory orchestrates the full-stack setup, acting as the bridge between the backend Node.js environment and the frontend Vite build tool.
 
-The architectural simplicity of EventHub makes deployment trivial on generic VPS platforms (Render, DigitalOcean, Heroku):
+| File | Purpose |
+|------|---------|
+| `server.ts` | **Backend Entry Point**: Configures the Express server. Handles REST API routes for authentication, event management, ticketing, and communities. Sets up a WebSocket server for real-time chat. |
+| `db.ts` | **Database Initialization**: Connects to `better-sqlite3` and provisions the schema (Users, Events, Bookings, Communities). Triggers initial seed data for easy development testing. |
+| `package.json` | Defines npm scripts (e.g., `npm run dev`) and lists dependencies like `express`, `better-sqlite3`, `react`, and `tailwindcss`. |
+| `vite.config.ts` | Configures Vite, including React plugins, to build the frontend. |
 
-1. **Build the production bundle:** `npm run build`
-2. **Set the environment:** `NODE_ENV=production`
-3. **Start the server:** `npm start`
+### `src/`
+**Purpose:** Contains the entire frontend presentation layer, built with React, React Router, and Tailwind CSS.
 
-*Note: You must attach a persistent disk volume to ensure `events.db` and `/public/uploads` survive server restarts.*
+| File | Purpose |
+|------|---------|
+| `App.tsx` | Contains the core frontend layout (Navbar), React Router definitions, and monolithic page components (Home, Events, Profile, Admin/Host Dashboards). |
+| `index.css` | The main stylesheet integrating Tailwind directives alongside specialized custom "luxury" design variables (`btn-luxury`, `glass`). |
+| `types.ts` | Centralized TypeScript models ensuring type safety between the frontend UI and the data structures returned by the Express API. |
 
----
+### `public/`
+**Purpose:** Stores assets that must remain statically accessible to the browser, bypassing the Vite bundler.
 
-## 🤝 Contributing Guidelines
+- **`uploads/`**: A dynamically utilized folder where the backend `multer` middleware saves images uploaded by hosts or users.
 
-1. Do not push to `main` directly.
-2. Use descriptive feature branches (e.g., `feature/login-update`).
-3. If altering database schemas, remember to update the corresponding setup/teardown blocks within `db.ts`.
+## Dependencies & Architecture
 
----
-*Built with ❤️ for vibrant campus communities.*
+- **Frontend -> Backend**: The React frontend (served via Vite during development) makes HTTP requests to the Express server defining the REST API.
+- **WebSocket Connection**: The `server.ts` leverages `ws` mapped to individual `communityId`s to push real-time chat messages to the frontend.
+- **Database Layer**: The Express APIs directly query `events.db` using synchronous SQL queries powered by `better-sqlite3` initialized inside `db.ts`.
+- **File Storage**: User and Event picture uploads are handled by `multer` in `server.ts` and saved locally to `public/uploads/`, which is served statically by Express.
+
+## Usage Notes & Setup
+
+### Prerequisites
+- Node.js (v18 or higher recommended)
+- `npm` package manager
+
+### Standard Setup Workflow
+1. **Install Dependencies:**
+   ```bash
+   npm install
+   ```
+2. **Environment Variables:**
+   Copy the example config and adjust as necessary:
+   ```bash
+   cp .env.example .env
+   ```
+3. **Run the Development Server:**
+   Start both the frontend and backend concurrently via `tsx`:
+   ```bash
+   npm run dev
+   ```
+   The server will launch with Vite middleware handling the frontend, available by default at `http://localhost:3000`.
+
+### Development Tips
+- **Database Seeding**: On the first start, `db.ts` will securely generate `events.db` and pre-fill it with test accounts (e.g., `admin@eventhub.com`, `host@eventhub.com`).
+- **Styles**: We use TailwindCSS. When creating new components, stick to the utility classes and the custom theme variables configured in `index.css`.
+
+## Best Practices & Contributing
+
+- **Component Organization**: Consider refactoring the current `src/App.tsx` file by modularizing specific pages (e.g., Home, Dashboard) and components into dedicated subdirectories like `src/components/` and `src/pages/` as the project scales.
+- **Database Migrations**: Currently, `db.ts` uses `CREATE TABLE IF NOT EXISTS`. When extending the schema, consider introducing an explicit migration tool if data persistence becomes critical.
+- **Type Safety**: Always update `src/types.ts` when altering table schemas in `db.ts` to ensure frontend interfaces remain synchronized with backend data.
+- **Extending the API**: Add new REST endpoints in `server.ts` under the appropriate domain comments (e.g., `// Events`, `// Auth`).
