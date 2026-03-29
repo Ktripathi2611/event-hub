@@ -2,15 +2,223 @@
 
 This document maps the repository structure, explains each directory, highlights key files, and captures setup and extension guidance for contributors.
 
+## EventHub at a Glance
+
+EventHub is a full-stack TypeScript platform for event discovery, ticket booking, sponsorship collaboration, and community engagement.
+
+- Frontend: React + Vite + Tailwind
+- Backend: Express + WebSocket
+- Database (current): SQLite via better-sqlite3
+- Target production path: PostgreSQL + Redis + object storage
+
+## Overall System Design Architecture
+
+The platform currently runs as a modular monolith on a single Express backend and SQLite database, with role-gated APIs and WebSocket-based real-time notifications/community updates.
+
+Implementation accuracy notes:
+
+- Current DB runtime is one SQLite file with multiple domain tables, not separate physical databases.
+- Current real-time transport is WebSocket for notifications and community messaging.
+- Payments API, external Maps provider API, and Email/SMS provider are roadmap integrations and are not fully wired in the current backend routes.
+
+### 1. System Flow (End-to-End)
+
+```mermaid
+flowchart TD
+
+%% CLIENT LAYER
+A[Client App Student / Host / Sponsor / Admin]
+
+%% ENTRY
+A --> B[Express API Backend]
+
+%% AUTH
+B --> C[Auth Middleware JWT]
+C --> D{Role Check}
+
+%% ROLE ROUTING
+D -->|Student| E[Booking and Waitlist Module]
+D -->|Host| F[Event Module]
+D -->|Sponsor| G[Sponsorship Module]
+D -->|Admin| H[Admin Moderation Module]
+
+%% CORE SERVICES
+F --> I[(SQLite DB Events and Related Tables)]
+E --> I
+G --> I
+H --> I
+
+%% CROSS-MODULE
+F --> G
+E --> F
+
+%% MESSAGING
+G --> L[Deal and Community Messaging]
+L --> I
+
+%% NOTIFICATIONS
+E --> N[Notification Module]
+F --> N
+G --> N
+N --> I
+
+%% REAL-TIME + CACHE
+B --> W[WebSocket Server ws]
+B --> P[(In-memory Analytics Cache)]
+
+%% PLANNED EXTERNAL INTEGRATIONS
+B -. planned .-> Q[Payments API]
+B -. planned .-> R[Maps Provider API]
+B -. planned .-> S[Email or SMS Service]
+```
+
+### 2. Detailed Role Interaction Flow
+
+```mermaid
+flowchart LR
+
+Student -->|Browse Events| EventService
+Student -->|Book Ticket| BookingService
+Student -->|Join Waitlist| BookingService
+
+Host -->|Create or Update Event| EventService
+Host -->|Manage Attendees and Check-ins| BookingService
+Host -->|Create Sponsor Requests and Spots| SponsorshipService
+
+Sponsor -->|View Sponsorship Opportunities| SponsorshipService
+Sponsor -->|Submit Request or Bid| SponsorshipService
+Sponsor -->|Negotiate Deals| SponsorshipService
+
+Admin -->|Approve or Moderate Events| EventService
+Admin -->|Moderate Reports| AdminService
+Admin -->|Review Sponsorship Requests| SponsorshipService
+
+EventService --> DB1[(Events Domain Tables)]
+BookingService --> DB2[(Bookings and Waitlist Tables)]
+SponsorshipService --> DB3[(Sponsorship Tables)]
+AdminService --> DB1
+AdminService --> DB3
+
+DB1 -. same sqlite runtime .- DB2
+DB2 -. same sqlite runtime .- DB3
+```
+
+### 3. Sponsorship and Bidding Workflow
+
+```mermaid
+sequenceDiagram
+
+participant Sponsor
+participant Backend
+participant SponsorshipService
+participant Host
+participant DB
+
+Sponsor->>Backend: View sponsorship requests or spots
+Backend->>SponsorshipService: Fetch opportunities
+SponsorshipService->>DB: Query sponsorship tables
+DB-->>SponsorshipService: Opportunities list
+SponsorshipService-->>Backend: Response
+Backend-->>Sponsor: Display opportunities
+
+Sponsor->>Backend: Submit request or bid
+Backend->>SponsorshipService: Create request or bid
+SponsorshipService->>DB: Store request or bid
+
+Host->>Backend: View incoming requests
+Backend->>SponsorshipService: Fetch incoming queue
+SponsorshipService->>DB: Query pending requests
+DB-->>SponsorshipService: Request list
+SponsorshipService-->>Host: Request list
+
+Host->>Backend: Accept or reject
+Backend->>SponsorshipService: Update request and deal
+SponsorshipService->>DB: Persist status and deal row
+
+SponsorshipService->>Backend: Trigger notification
+Backend-->>Sponsor: Notify result
+```
+
+### 4. Messaging (Real-Time)
+
+```mermaid
+sequenceDiagram
+
+participant UserA as Sponsor or Host
+participant WS as WebSocket
+participant Backend
+participant DB as SQLite
+participant UserB as Other Participant
+
+UserA->>WS: Send real-time message or event update
+WS->>Backend: Forward payload
+Backend->>DB: Persist notification or community message
+Backend->>UserB: Deliver live update
+
+UserB->>WS: Reply
+WS->>Backend: Forward payload
+Backend->>DB: Persist reply
+Backend->>UserA: Deliver live update
+```
+
+### 5. RBAC (Authorization Flow)
+
+```mermaid
+flowchart TD
+
+A[Incoming Request] --> B[JWT Authentication]
+
+B --> C{Valid Token}
+
+C -->|No| D[Reject Request 401]
+C -->|Yes| E[Extract User Role]
+
+E --> F{Check Role Permissions}
+
+F -->|Allowed| G[Proceed to Route Handler]
+F -->|Denied| H[Return 403 Forbidden]
+
+G --> I[Service Logic]
+I --> J[Database Access]
+```
+
+### How to Use These Diagrams
+
+- Use Diagram 1 in architecture presentations for complete system flow.
+- Use Diagram 2 to explain what each role can do in the product.
+- Use Diagram 3 to highlight the sponsorship negotiation differentiator.
+- Use Diagram 4 to explain real-time collaboration behavior.
+- Use Diagram 5 for backend security and interview discussions.
+
+## Architecture & Research Documents
+
+Detailed design, workflows, market analysis, scalability, compliance, and IEEE-style synthesis are documented in the EVENT-HUB-PAPERS folder.
+
+- Location: EVENT-HUB-PAPERS/
+- Key files:
+  - 01-system-architecture.md
+  - 02-role-based-design.md
+  - 03-feature-design.md
+  - 04-technical-architecture.md
+  - 05-workflows-and-business-logic.md
+  - 06-market-analysis-and-differentiation.md
+  - 07-scalability-and-devops.md
+  - 08-security-and-compliance.md
+  - 09-go-to-market-and-roi.md
+  - 10-ieee-research-paper.md
+
 ## Table of Contents
 
-1. [Project Snapshot](#project-snapshot)
-2. [Hierarchy Tree](#hierarchy-tree)
-3. [Directory Dependency Map](#directory-dependency-map)
-4. [Directory Reference](#directory-reference)
-5. [Setup and Environment Requirements](#setup-and-environment-requirements)
-6. [Workflow Notes](#workflow-notes)
-7. [Best Practices for Contributing and Extending](#best-practices-for-contributing-and-extending)
+1. [EventHub at a Glance](#eventhub-at-a-glance)
+2. [Overall System Design Architecture](#overall-system-design-architecture)
+3. [Architecture & Research Documents](#architecture--research-documents)
+4. [Project Snapshot](#project-snapshot)
+5. [Hierarchy Tree](#hierarchy-tree)
+6. [Directory Dependency Map](#directory-dependency-map)
+7. [Directory Reference](#directory-reference)
+8. [Setup and Environment Requirements](#setup-and-environment-requirements)
+9. [Workflow Notes](#workflow-notes)
+10. [Best Practices for Contributing and Extending](#best-practices-for-contributing-and-extending)
 
 ## Project Snapshot
 
@@ -66,7 +274,7 @@ event-hub/
 ```
 
 ## Directory Dependency Map
-    
+
 | Source Directory/File | Depends On                      | Why It Depends On                                                                |
 | --------------------- | ------------------------------- | -------------------------------------------------------------------------------- |
 | src/                  | server.ts API routes            | Frontend fetches data, performs auth, bookings, sponsorship, notifications, etc. |
