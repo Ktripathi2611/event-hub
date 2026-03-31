@@ -69,8 +69,19 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
-      // Hot Module Replacement (HMR) configuration.
-      hmr: process.env.DISABLE_HMR !== 'true',
+      // Listen on all interfaces (0.0.0.0) to accept external connections
+      host: '0.0.0.0',
+      // Allow requests from localhost and ngrok domains
+      allowedHosts: ['localhost', '127.0.0.1', '.ngrok.io', '.ngrok-free.dev'],
+      // HMR configuration for development with ngrok
+      hmr: process.env.DISABLE_HMR === 'true'
+        ? false
+        : {
+            // Use protocol-relative URLs so HMR adapts to client's origin
+            host: process.env.HMR_HOST || 'localhost',
+            port: parseInt(process.env.HMR_PORT || '5173'),
+            protocol: 'ws',
+          },
     },
   };
 });
