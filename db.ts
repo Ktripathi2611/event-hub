@@ -98,6 +98,25 @@ db.exec(`
     FOREIGN KEY (ticket_type_id) REFERENCES ticket_types(id)
   );
 
+  CREATE TABLE IF NOT EXISTS tickets (
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT UNIQUE NOT NULL,
+    booking_id TEXT UNIQUE NOT NULL,
+    user_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    status TEXT CHECK(status IN ('pending', 'verified')) DEFAULT 'pending',
+    verification_status TEXT CHECK(verification_status IN ('PENDING_VERIFICATION', 'VERIFIED_ATTENDANCE')) DEFAULT 'PENDING_VERIFICATION',
+    issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    verified_at DATETIME,
+    verified_by TEXT,
+    expires_at DATETIME,
+    qr_token TEXT NOT NULL,
+    FOREIGN KEY (booking_id) REFERENCES bookings(id),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (event_id) REFERENCES events(id),
+    FOREIGN KEY (verified_by) REFERENCES users(id)
+  );
+
   CREATE TABLE IF NOT EXISTS reviews (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -467,6 +486,21 @@ addColumnIfMissing('bookings', 'checked_in_at', 'DATETIME');
 addColumnIfMissing('bookings', 'checked_in_by', 'TEXT');
 addColumnIfMissing('bookings', 'promo_code_used', 'TEXT');
 addColumnIfMissing('notifications', 'dedupe_key', 'TEXT');
+addColumnIfMissing('tickets', 'verification_status', "TEXT DEFAULT 'PENDING_VERIFICATION'");
+
+db.exec(`
+  UPDATE tickets
+  SET verification_status = CASE
+    WHEN status = 'verified' THEN 'VERIFIED_ATTENDANCE'
+    ELSE 'PENDING_VERIFICATION'
+  END
+  WHERE verification_status IS NULL
+     OR verification_status NOT IN ('PENDING_VERIFICATION', 'VERIFIED_ATTENDANCE');
+`);
+
+db.exec('CREATE INDEX IF NOT EXISTS idx_tickets_event_status ON tickets(event_id, status);');
+db.exec('CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id);');
+db.exec('CREATE INDEX IF NOT EXISTS idx_tickets_booking_id ON tickets(booking_id);');
 
 // Full text search index for events discovery.
 // Recreate each startup to keep local data deterministic and avoid legacy schema issues.

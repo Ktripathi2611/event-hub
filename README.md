@@ -1,78 +1,106 @@
-# EventHub Workspace Map
+# 🎟️ EventHub — Campus Event Discovery & Ticketing Platform
 
-This document maps the repository structure, explains each directory, highlights key files, and captures setup and extension guidance for contributors.
+> A full-stack event booking platform for college campuses featuring secure QR-based ticket verification, real-time notifications, community engagement, and sponsorship management.
 
-## EventHub at a Glance
+[![Tech Stack](https://img.shields.io/badge/React-19-blue?logo=react)](https://react.dev)
+[![Backend](https://img.shields.io/badge/Express-4-green?logo=express)](https://expressjs.com)
+[![Database](https://img.shields.io/badge/SQLite-3-lightblue?logo=sqlite)](https://www.sqlite.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript)](https://www.typescriptlang.org)
 
-EventHub is a full-stack TypeScript platform for event discovery, ticket booking, sponsorship collaboration, and community engagement.
+---
 
-- Frontend: React + Vite + Tailwind
-- Backend: Express + WebSocket
-- Database (current): SQLite via better-sqlite3
-- Target production path: PostgreSQL + Redis + object storage
+## 📑 Table of Contents
 
-## Overall System Design Architecture
+- [Features](#-features)
+- [Architecture Overview](#-architecture-overview)
+- [Folder Structure](#-folder-structure)
+- [Getting Started](#-getting-started)
+- [Environment Variables](#-environment-variables)
+- [Database Schema](#-database-schema)
+- [API Endpoint Reference](#-api-endpoint-reference)
+- [Authentication & Roles](#-authentication--roles)
+- [QR Ticket Verification System](#-qr-ticket-verification-system)
+- [WebSocket Real-Time Events](#-websocket-real-time-events)
+- [Test Credentials](#-test-credentials)
+- [Design System](#-design-system)
+- [Contributing](#-contributing)
 
-The platform currently runs as a modular monolith on a single Express backend and SQLite database, with role-gated APIs and WebSocket-based real-time notifications/community updates.
+---
 
-Implementation accuracy notes:
+## ✨ Features
 
-- Current DB runtime is one SQLite file with multiple domain tables, not separate physical databases.
-- Current real-time transport is WebSocket for notifications and community messaging.
-- Payments API, external Maps provider API, and Email/SMS provider are roadmap integrations and are not fully wired in the current backend routes.
+| Category | Features |
+|----------|----------|
+| **Events** | Browse, search (FTS5), filter by category/venue/date, create, edit, duplicate, recurring events |
+| **Tickets** | Multi-tier ticket types, QR code generation, secure JWT-signed QR tokens, real-time verification |
+| **Scanner** | Camera-based QR scanner (Html5Qrcode), manual fallback, scan history, live attendance stats |
+| **Communities** | Create/join communities, discussion threads, real-time messaging |
+| **Sponsorship** | Sponsor spots, bidding system, deal management, sponsorship analytics |
+| **Social** | Follow/unfollow system, user profiles, wishlist, event sharing |
+| **Admin** | Event approval/rejection, content moderation, reports, platform-wide attendance tracking |
+| **Real-Time** | WebSocket notifications, live ticket verification status, chat messaging |
+| **PWA** | Progressive Web App support with offline capabilities |
 
-### 1. System Flow (End-to-End)
+---
+
+## 🏗️ Architecture Overview
+
+The EventHub system is architected as a high-performance, real-time event orchestration platform. Below is the end-to-end system flow depicting service interactions and data routing.
+
+### 🧠 1. System Flow (End-to-End)
 
 ```mermaid
 flowchart TD
 
 %% CLIENT LAYER
-A[Client App Student / Host / Sponsor / Admin]
+A[Client App (Student / Host / Sponsor / Admin)]
 
 %% ENTRY
-A --> B[Express API Backend]
+A --> B[API Gateway / Backend Server]
 
 %% AUTH
-B --> C[Auth Middleware JWT]
+B --> C[Auth Service]
 C --> D{Role Check}
 
 %% ROLE ROUTING
-D -->|Student| E[Booking and Waitlist Module]
-D -->|Host| F[Event Module]
-D -->|Sponsor| G[Sponsorship Module]
-D -->|Admin| H[Admin Moderation Module]
+D -->|Student| E[Booking Service]
+D -->|Host| F[Event Service]
+D -->|Sponsor| G[Sponsorship Service]
+D -->|Admin| H[Admin Moderation Service]
 
 %% CORE SERVICES
-F --> I[(SQLite DB Events and Related Tables)]
-E --> I
-G --> I
+F --> I[(Events DB)]
+E --> J[(Bookings DB)]
+G --> K[(Sponsorship DB)]
 H --> I
+H --> K
 
-%% CROSS-MODULE
+%% CROSS-SERVICE
 F --> G
 E --> F
 
 %% MESSAGING
-G --> L[Deal and Community Messaging]
-L --> I
+G --> L[Messaging Service]
+L --> M[(Messages DB)]
 
 %% NOTIFICATIONS
-E --> N[Notification Module]
+E --> N[Notification Service]
 F --> N
 G --> N
-N --> I
+N --> O[(Notifications DB)]
 
-%% REAL-TIME + CACHE
-B --> W[WebSocket Server ws]
-B --> P[(In-memory Analytics Cache)]
+%% CACHE
+B --> P[(Redis Cache)]
 
-%% PLANNED EXTERNAL INTEGRATIONS
-B -. planned .-> Q[Payments API]
-B -. planned .-> R[Maps Provider API]
-B -. planned .-> S[Email or SMS Service]
+%% EXTERNAL
+B --> Q[Payments API]
+B --> R[Maps API]
+B --> S[Email/SMS Service]
 ```
 
-### 2. Detailed Role Interaction Flow
+### 🧩 2. Detailed Role Interaction Flow
+
+Describes how different user personas interact with the core domain services.
 
 ```mermaid
 flowchart LR
@@ -81,29 +109,185 @@ Student -->|Browse Events| EventService
 Student -->|Book Ticket| BookingService
 Student -->|Join Waitlist| BookingService
 
-Host -->|Create or Update Event| EventService
-Host -->|Manage Attendees and Check-ins| BookingService
-Host -->|Create Sponsor Requests and Spots| SponsorshipService
+Host -->|Create Event| EventService
+Host -->|Manage Attendees| BookingService
+Host -->|Create Sponsor Spots| SponsorshipService
 
-Sponsor -->|View Sponsorship Opportunities| SponsorshipService
-Sponsor -->|Submit Request or Bid| SponsorshipService
-Sponsor -->|Negotiate Deals| SponsorshipService
+Sponsor -->|View Events| SponsorshipService
+Sponsor -->|Submit Proposal| SponsorshipService
+Sponsor -->|Bid for Spots| SponsorshipService
 
-Admin -->|Approve or Moderate Events| EventService
+Admin -->|Approve Events| EventService
 Admin -->|Moderate Reports| AdminService
-Admin -->|Review Sponsorship Requests| SponsorshipService
+Admin -->|Approve Sponsors| SponsorshipService
 
-EventService --> DB1[(Events Domain Tables)]
-BookingService --> DB2[(Bookings and Waitlist Tables)]
-SponsorshipService --> DB3[(Sponsorship Tables)]
+EventService --> DB1[(Events DB)]
+BookingService --> DB2[(Bookings DB)]
+SponsorshipService --> DB3[(Sponsorship DB)]
 AdminService --> DB1
 AdminService --> DB3
-
-DB1 -. same sqlite runtime .- DB2
-DB2 -. same sqlite runtime .- DB3
 ```
 
-### 3. Sponsorship and Bidding Workflow
+**Key Technologies:**
+- **Frontend:** React 19, Vite 6, TailwindCSS v4, Motion (Framer Motion), Recharts, Lucide Icons
+- **Backend:** Express 4, better-sqlite3, jsonwebtoken, bcryptjs, multer, qrcode
+- **Real-Time:** ws (WebSocket), Html5Qrcode (camera scanner)
+- **Tooling:** TypeScript 5.7, ESLint, PostCSS
+
+---
+
+## 📁 Folder Structure
+
+```
+event-hub/
+├── 📄 server.ts              # Express API server + WebSocket + Vite middleware
+├── 📄 db.ts                   # SQLite schema, migrations, seed data
+├── 📄 vite.config.ts          # Vite configuration (proxy, PWA, aliases)
+├── 📄 package.json            # Dependencies and scripts
+├── 📄 tsconfig.json           # TypeScript configuration (app)
+├── 📄 tsconfig.node.json      # TypeScript configuration (server/build)
+├── 📄 tailwind.config.ts      # TailwindCSS v4 configuration
+├── 📄 postcss.config.js       # PostCSS plugins
+├── 📄 .env.example            # Environment variable template
+├── 📄 index.html              # SPA entry point
+│
+├── 📂 src/                    # Frontend source
+│   ├── 📄 App.tsx             # Main application (all pages & components)
+│   ├── 📄 main.tsx            # React entry point
+│   ├── 📄 index.css           # Global styles & design tokens
+│   ├── 📄 types.ts            # TypeScript interfaces & types
+│   ├── 📄 vite-env.d.ts       # Vite type declarations
+│   └── 📂 features/
+│       └── 📂 sponsorship/
+│           └── 📄 api.ts      # Sponsorship API helpers
+│
+├── 📂 public/                 # Static assets
+│   └── 📄 vite.svg            # Default Vite icon
+│
+├── 📂 uploads/                # User-uploaded images (event posters)
+│
+├── 📂 EVENT-HUB-PAPERS/       # Project documentation & papers
+│
+└── 📂 data/                   # SQLite database files (auto-created)
+    └── 📄 eventhub.db         # Main database
+```
+
+### Key Files
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `server.ts` | ~3,843 | Complete REST API with 60+ endpoints, auth middleware, WebSocket server, rate limiting |
+| `db.ts` | ~979 | Database schema (20+ tables), indexes, seed data for all features |
+| `src/App.tsx` | ~4,940 | Entire React SPA — 22+ page components, navigation, theme system |
+| `src/types.ts` | ~319 | TypeScript interfaces for all data models |
+| `src/index.css` | — | "Nocturnal Architect" design system tokens and utility classes |
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- **Node.js** ≥ 18
+- **npm** ≥ 9
+
+### Installation
+
+```bash
+# Clone the repository
+git clone <repo-url>
+cd event-hub
+
+# Install dependencies
+npm install
+
+# Copy environment variables
+cp .env.example .env
+# Edit .env and set a strong JWT_SECRET
+```
+
+### Development
+
+```bash
+# Start the development server (Express + Vite HMR)
+npm run dev
+```
+
+The app will be available at **http://localhost:3000**.
+
+### Production Build
+
+```bash
+# Build the frontend
+npm run build
+
+# Start in production mode
+NODE_ENV=production node server.ts
+```
+
+---
+
+## 🔑 Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `JWT_SECRET` | ✅ | — | Secret key for signing JWT auth tokens and QR payloads |
+| `GEMINI_API_KEY` | ❌ | `""` | Google Gemini API key (reserved for AI features) |
+| `APP_URL` | ❌ | `http://localhost:3000` | Base URL for the application |
+| `DISABLE_HMR` | ❌ | `false` | Disable Vite hot module reload |
+
+---
+
+## 🗄️ Database Schema
+
+The SQLite database contains **20+ tables**. Key tables:
+
+### Core Tables
+
+| Table | Purpose | Key Fields |
+|-------|---------|------------|
+| `users` | User accounts | `id`, `username`, `email`, `password_hash`, `role`, `avatar` |
+| `events` | Event listings | `id`, `name`, `date`, `venue`, `host_id`, `status`, `total_seats` |
+| `bookings` | Ticket purchases | `id`, `user_id`, `event_id`, `booking_ref`, `quantity`, `total_price`, `qr_code` |
+| `tickets` | Individual tickets | `ticket_id`, `booking_id`, `event_id`, `user_id`, `status`, `verification_status`, `qr_token` |
+| `ticket_types` | Ticket tiers (VIP, General) | `id`, `event_id`, `name`, `price`, `quantity` |
+| `categories` | Event categories | `id`, `name`, `icon` |
+
+### Social & Community Tables
+
+| Table | Purpose |
+|-------|---------|
+| `communities` | User-created groups |
+| `community_members` | Membership tracking |
+| `community_posts` | Community feed posts |
+| `community_messages` | Real-time chat messages |
+| `follows` | User follow/follower relationships |
+| `discussions` | Event discussion threads |
+| `wishlists` | Saved/bookmarked events |
+
+### Sponsorship Tables
+
+| Table | Purpose |
+|-------|---------|
+| `sponsors` | Sponsor company profiles |
+| `sponsor_spots` | Sponsorship slots within events |
+| `bids` | Auction-style sponsorship bids |
+| `sponsorship_requests` | Host-to-sponsor outreach |
+| `deals` | Finalized sponsorship agreements |
+| `deal_messages` | Deal negotiation chat |
+
+### System Tables
+
+| Table | Purpose |
+|-------|---------|
+| `notifications` | Push notification queue |
+| `reports` | Content moderation reports |
+| `event_faqs` | Event FAQ entries |
+| `event_analytics_snapshots` | Historical analytics data |
+
+### 💼 3. Sponsorship + Bidding Workflow
+
+EventHub features a unique sponsorship bidding system that allows local businesses to compete for visibility at high-traffic campus events.
 
 ```mermaid
 sequenceDiagram
@@ -114,459 +298,272 @@ participant SponsorshipService
 participant Host
 participant DB
 
-Sponsor->>Backend: View sponsorship requests or spots
-Backend->>SponsorshipService: Fetch opportunities
-SponsorshipService->>DB: Query sponsorship tables
-DB-->>SponsorshipService: Opportunities list
+Sponsor->>Backend: View Sponsor Spots
+Backend->>SponsorshipService: Fetch Spots
+SponsorshipService->>DB: Query Spots
+DB-->>SponsorshipService: Spots List
 SponsorshipService-->>Backend: Response
-Backend-->>Sponsor: Display opportunities
+Backend-->>Sponsor: Display Spots
 
-Sponsor->>Backend: Submit request or bid
-Backend->>SponsorshipService: Create request or bid
-SponsorshipService->>DB: Store request or bid
+Sponsor->>Backend: Submit Proposal / Bid
+Backend->>SponsorshipService: Create Proposal
+SponsorshipService->>DB: Store Proposal
 
-Host->>Backend: View incoming requests
-Backend->>SponsorshipService: Fetch incoming queue
-SponsorshipService->>DB: Query pending requests
-DB-->>SponsorshipService: Request list
-SponsorshipService-->>Host: Request list
+Host->>Backend: View Proposals
+Backend->>SponsorshipService: Fetch Proposals
+SponsorshipService->>DB: Query
+DB-->>Host: Proposal List
 
-Host->>Backend: Accept or reject
-Backend->>SponsorshipService: Update request and deal
-SponsorshipService->>DB: Persist status and deal row
+Host->>Backend: Accept / Reject
+Backend->>SponsorshipService: Update Deal
+SponsorshipService->>DB: Save Deal
 
-SponsorshipService->>Backend: Trigger notification
-Backend-->>Sponsor: Notify result
+SponsorshipService->>Backend: Trigger Notification
+Backend->>Sponsor: Notify Result
 ```
 
-### 4. Messaging (Real-Time)
+---
 
-```mermaid
-sequenceDiagram
+## 📡 API Endpoint Reference
 
-participant UserA as Sponsor or Host
-participant WS as WebSocket
-participant Backend
-participant DB as SQLite
-participant UserB as Other Participant
+### Authentication
 
-UserA->>WS: Send real-time message or event update
-WS->>Backend: Forward payload
-Backend->>DB: Persist notification or community message
-Backend->>UserB: Deliver live update
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/api/register` | ❌ | Register new user |
+| `POST` | `/api/login` | ❌ | Login (returns JWT + user) |
 
-UserB->>WS: Reply
-WS->>Backend: Forward payload
-Backend->>DB: Persist reply
-Backend->>UserA: Deliver live update
-```
+### Events
 
-### 5. RBAC (Authorization Flow)
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/api/events` | ❌ | List all approved events (with search, filter, pagination) |
+| `GET` | `/api/events/:id` | ❌ | Get event details |
+| `POST` | `/api/events` | Host | Create event (multipart form with image) |
+| `PUT` | `/api/events/:id` | Host | Update event |
+| `DELETE` | `/api/host/events/:id` | Host | Delete event |
+| `POST` | `/api/events/:id/duplicate` | Host | Duplicate event |
+| `POST` | `/api/events/:id/recurring` | Host | Schedule recurring instances |
+
+### Tickets & Verification
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/api/bookings` | User | Book tickets (generates QR code) |
+| `GET` | `/api/bookings/user/:userId` | Self/Admin | Get user's bookings |
+| `GET` | `/api/tickets/user/:userId` | Self/Admin | Get user's tickets |
+| `POST` | `/api/tickets/verify` | Host/Admin | Verify ticket via QR scan |
+| `POST` | `/api/tickets/verify-manual` | Host/Admin | Manual verification by ID/email |
+| `GET` | `/api/ticket-status` | Auth | Check ticket verification status |
+| `GET` | `/api/events/:id/attendees` | Host/Admin | List event attendees |
+| `GET` | `/api/events/:id/tickets/summary` | Host/Admin | Attendance statistics |
+
+### Admin
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/api/admin/events/pending` | Admin | List pending events |
+| `POST` | `/api/admin/events/:id/approve` | Admin | Approve event |
+| `POST` | `/api/admin/events/:id/reject` | Admin | Reject event |
+| `DELETE` | `/api/admin/events/:id` | Admin | Force-delete event |
+| `GET` | `/api/admin/reports` | Admin | List content reports |
+
+### Communities & Social
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/api/communities` | ❌ | List all communities |
+| `POST` | `/api/communities` | Auth | Create community |
+| `POST` | `/api/communities/:id/join` | Auth | Join community |
+| `POST` | `/api/follow/:id` | Auth | Follow a user |
+| `GET` | `/api/notifications` | Auth | Get user notifications |
+
+---
+
+## 🔐 Authentication & Roles
+
+EventHub uses **JWT-based authentication** with bcrypt password hashing.
+
+### Roles
+
+| Role | Capabilities |
+|------|-------------|
+| **`student`** | Browse events, book tickets, join communities, follow users |
+| **`host`** | All student perms + create/manage events, scan tickets, view attendees |
+| **`admin`** | All perms + approve/reject events, manage reports, platform-wide access |
+| **`sponsor`** | Sponsor dashboard, place bids, manage deals |
+
+### Auth Flow
+
+1. User registers → password hashed with `bcryptjs`
+2. User logs in → server returns JWT token + user object
+3. Client stores token in `localStorage` as `authToken`
+4. All authenticated requests include `Authorization: Bearer <token>` header
+5. Server middleware (`requireAuth`, `requireRole`) validates JWT and enforces access control
+
+### ⚙️ 5. RBAC (Authorization Flow)
 
 ```mermaid
 flowchart TD
 
 A[Incoming Request] --> B[JWT Authentication]
 
-B --> C{Valid Token}
+B --> C{Valid Token?}
 
-C -->|No| D[Reject Request 401]
+C -->|No| D[Reject Request]
 C -->|Yes| E[Extract User Role]
 
-E --> F{Check Role Permissions}
+E --> F{Check Permissions}
 
-F -->|Allowed| G[Proceed to Route Handler]
-F -->|Denied| H[Return 403 Forbidden]
+F -->|Allowed| G[Proceed to Service]
+F -->|Denied| H[403 Forbidden]
 
 G --> I[Service Logic]
 I --> J[Database Access]
 ```
 
-### How to Use These Diagrams
+---
 
-- Use Diagram 1 in architecture presentations for complete system flow.
-- Use Diagram 2 to explain what each role can do in the product.
-- Use Diagram 3 to highlight the sponsorship negotiation differentiator.
-- Use Diagram 4 to explain real-time collaboration behavior.
-- Use Diagram 5 for backend security and interview discussions.
+## 📱 QR Ticket Verification System
 
-## Architecture & Research Documents
+### Flow
 
-Detailed design, workflows, market analysis, scalability, compliance, and IEEE-style synthesis are documented in the EVENT-HUB-PAPERS folder.
-
-- Location: EVENT-HUB-PAPERS/
-- Key files:
-  - 01-system-architecture.md
-  - 02-role-based-design.md
-  - 03-feature-design.md
-  - 04-technical-architecture.md
-  - 05-workflows-and-business-logic.md
-  - 06-market-analysis-and-differentiation.md
-  - 07-scalability-and-devops.md
-  - 08-security-and-compliance.md
-  - 09-go-to-market-and-roi.md
-  - 10-ieee-research-paper.md
-
-## Table of Contents
-
-1. [EventHub at a Glance](#eventhub-at-a-glance)
-2. [Overall System Design Architecture](#overall-system-design-architecture)
-3. [Architecture & Research Documents](#architecture--research-documents)
-4. [Project Snapshot](#project-snapshot)
-5. [Hierarchy Tree](#hierarchy-tree)
-6. [Directory Dependency Map](#directory-dependency-map)
-7. [Directory Reference](#directory-reference)
-8. [Setup and Environment Requirements](#setup-and-environment-requirements)
-9. [Workflow Notes](#workflow-notes)
-10. [Best Practices for Contributing and Extending](#best-practices-for-contributing-and-extending)
-
-## Project Snapshot
-
-- Project type: Full-stack TypeScript monolith
-- Frontend: React + Vite + Tailwind
-- Backend: Express + WebSocket
-- Database: SQLite via better-sqlite3
-- Runtime default URL: http://localhost:3000
-
-## Hierarchy Tree
-
-Notes:
-
-- This tree includes all project-visible top-level directories and the full project-owned source/config files.
-- Tool-managed directories are listed but not deeply expanded to keep documentation usable.
-
-```text
-event-hub/
-|-- .git/                        # Git metadata (tool-managed)
-|-- dist/                        # Production build output (generated)
-|   |-- assets/
-|   |-- icon-192.svg
-|   |-- icon-512.svg
-|   |-- index.html
-|   |-- manifest.webmanifest
-|   |-- sw.js
-|   |-- uploads/
-|   `-- workbox-78ef5c9b.js
-|-- node_modules/                # Installed dependencies (tool-managed)
-|-- public/                      # Static public assets
-|   |-- icon-192.svg
-|   |-- icon-512.svg
-|   `-- uploads/
-|-- scripts/                     # Utility script folder (currently empty)
-|-- src/                         # Frontend source
-|   |-- App.tsx
-|   |-- index.css
-|   |-- main.tsx
-|   |-- types.ts
-|   `-- vite-env.d.ts
-|-- .env.example
-|-- .gitignore
-|-- db.ts
-|-- events.db
-|-- index.html
-|-- metadata.json
-|-- package-lock.json
-|-- package.json
-|-- README.md
-|-- server.ts
-|-- tsconfig.json
-`-- vite.config.ts
+```
+Student Books Ticket → QR Code Generated (JWT-signed) → Host Scans at Gate
+     │                        │                              │
+     ▼                        ▼                              ▼
+  Booking created      qrcode library generates        Html5Qrcode camera
+  in database          data URL with JWT payload       reads QR → POST /api/tickets/verify
+                                                             │
+                                                             ▼
+                                                     Server verifies JWT signature,
+                                                     checks ticket status, updates DB
+                                                             │
+                                                             ▼
+                                                     WebSocket broadcasts
+                                                     "ticket_verified" to user
 ```
 
-## Directory Dependency Map
-
-| Source Directory/File | Depends On                      | Why It Depends On                                                                |
-| --------------------- | ------------------------------- | -------------------------------------------------------------------------------- |
-| src/                  | server.ts API routes            | Frontend fetches data, performs auth, bookings, sponsorship, notifications, etc. |
-| src/main.tsx          | vite-plugin-pwa output          | Registers service worker and enables PWA behavior.                               |
-| src/App.tsx           | src/types.ts                    | Uses shared interfaces for typed UI state and API payloads.                      |
-| server.ts             | db.ts                           | Imports DB connection and queries SQLite tables.                                 |
-| server.ts             | public/uploads                  | Serves uploaded files and stores upload paths.                                   |
-| server.ts (prod mode) | dist/                           | Serves built frontend assets in production.                                      |
-| db.ts                 | events.db                       | Initializes and migrates runtime database schema.                                |
-| vite.config.ts        | public/ icons                   | Uses icon files in generated web manifest.                                       |
-| package.json scripts  | server.ts, vite.config.ts, src/ | Drives dev/build/preview/start workflows.                                        |
-
-## Directory Reference
-
-### Root Directory: event-hub/
-
-Name and Purpose:
-
-- Repository root containing runtime entrypoints, build configs, and database/runtime artifacts.
-
-Key Files:
-
-| File              | Role                                                          |
-| ----------------- | ------------------------------------------------------------- |
-| package.json      | Project scripts and dependency declarations.                  |
-| package-lock.json | Locked dependency versions for reproducible installs.         |
-| server.ts         | Express API server, middleware, uploads, and WebSocket logic. |
-| db.ts             | SQLite schema creation, additive migrations, and seed data.   |
-| events.db         | Runtime SQLite DB file used by the backend.                   |
-| tsconfig.json     | TypeScript compiler behavior for project code.                |
-| vite.config.ts    | Vite, React, Tailwind, and PWA configuration.                 |
-| index.html        | Frontend HTML entry shell for Vite app.                       |
-| .env.example      | Environment variable template.                                |
-| metadata.json     | App metadata descriptor.                                      |
-| .gitignore        | Exclusion rules for git-tracked files.                        |
-
-Dependencies:
-
-- Root runtime starts through server.ts, which uses db.ts and serves frontend assets from dist/ or Vite middleware.
-- Frontend build and dev behavior is governed by package.json scripts + vite.config.ts + tsconfig.json.
-
-Usage Notes:
-
-- Keep backend bound to localhost:3000 for current architecture expectations.
-- Treat events.db as local runtime data; schema source of truth stays in db.ts.
-- Use npm scripts from package.json rather than ad-hoc start commands.
-
-### Directory: src/
-
-Name and Purpose:
-
-- Frontend React application source code.
-
-Key Files:
-
-| File              | Role                                                                         |
-| ----------------- | ---------------------------------------------------------------------------- |
-| src/main.tsx      | React bootstrap; mounts app and registers PWA SW.                            |
-| src/App.tsx       | Main SPA composition: routes, views, fetch calls, role-gated UI, dashboards. |
-| src/types.ts      | Shared TS interfaces for domain models and API data.                         |
-| src/index.css     | Global styles, Tailwind-driven styling, app-level tokens/utilities.          |
-| src/vite-env.d.ts | Type declarations for Vite client environment.                               |
-
-Dependencies:
-
-- Consumes backend endpoints from server.ts.
-- Uses PWA assets generated/configured via vite.config.ts.
-- Depends on dependency graph declared in package.json.
-
-Usage Notes:
-
-- App.tsx is monolithic; when extending features, prefer extracting feature modules/components.
-- Keep types.ts synchronized with backend payload changes to avoid runtime mismatch.
-
-### Directory: public/
-
-Name and Purpose:
-
-- Static files served directly by Vite/dev server and copied into production output.
-
-Key Files:
-
-| File                | Role                                              |
-| ------------------- | ------------------------------------------------- |
-| public/icon-192.svg | PWA app icon, 192px variant.                      |
-| public/icon-512.svg | PWA app icon, 512px variant.                      |
-| public/uploads/     | Filesystem target for uploaded user/event images. |
-
-Dependencies:
-
-- vite.config.ts references icons for manifest generation.
-- server.ts serves upload assets and writes uploaded files here.
-
-Usage Notes:
-
-- Ensure write permission exists for public/uploads in local and deployed environments.
-
-### Directory: public/uploads/
-
-Name and Purpose:
-
-- Runtime storage for uploaded assets.
-
-Key Files:
-
-- No source-controlled key files by default; content is runtime-generated.
-
-Dependencies:
-
-- Populated by multer storage in server.ts.
-- Paths are stored in DB rows and rendered by frontend.
-
-Usage Notes:
-
-- Add retention/cleanup policy if storage growth becomes a concern.
-
-### Directory: dist/
-
-Name and Purpose:
-
-- Generated production build output from Vite.
-
-Key Files:
-
-| File/Folder               | Role                                                  |
-| ------------------------- | ----------------------------------------------------- |
-| dist/index.html           | Built frontend entrypoint used in production serving. |
-| dist/assets/              | Bundled and hashed JS/CSS assets.                     |
-| dist/sw.js                | Service worker generated for PWA support.             |
-| dist/manifest.webmanifest | Web app manifest consumed by browsers.                |
-| dist/workbox-\*.js        | Workbox runtime chunk for caching strategy.           |
-| dist/uploads/             | Copied upload/static folder in build output context.  |
-
-Dependencies:
-
-- Produced by npm run build.
-- Served by server.ts in production mode.
-
-Usage Notes:
-
-- Do not edit dist files manually; regenerate via build script.
-
-### Directory: scripts/
-
-Name and Purpose:
-
-- Reserved space for operational and maintenance scripts.
-
-Key Files:
-
-- Currently empty.
-
-Dependencies:
-
-- Optional; typically used to automate DB tasks, migrations, or maintenance commands.
-
-Usage Notes:
-
-- Keep scripts idempotent and document expected side effects.
-
-### Directory: node_modules/
-
-Name and Purpose:
-
-- Installed npm packages.
-
-Key Files:
-
-- Tool-managed dependency contents; no manual edits.
-
-Dependencies:
-
-- Populated from package.json and package-lock.json using npm install.
-
-Usage Notes:
-
-- Never hand-edit files here.
-- Reinstall instead of patching dependency code directly.
-
-### Directory: .git/
-
-Name and Purpose:
-
-- Git repository metadata.
-
-Key Files:
-
-- Internal VCS state (refs, objects, hooks, config snapshots).
-
-Dependencies:
-
-- Used by git CLI tooling and source-control features.
-
-Usage Notes:
-
-- Never modify internals manually unless you are repairing repository state intentionally.
-
-## Setup and Environment Requirements
-
-### Prerequisites
-
-- Node.js 20+ recommended
-- npm 10+
-- Windows, macOS, or Linux shell
-
-### Environment
-
-Copy values from .env.example and set as needed:
-
-| Variable       | Required | Description                                               |
-| -------------- | -------- | --------------------------------------------------------- |
-| JWT_SECRET     | Yes      | Secret used for JWT signing/verification in backend auth. |
-| GEMINI_API_KEY | Optional | Optional browser-exposed API key use-case.                |
-| APP_URL        | Optional | Reserved absolute URL setting.                            |
-| DISABLE_HMR    | Optional | Set true to disable Vite HMR in development.              |
-
-### Install
-
-```bash
-npm install
+### QR Payload Structure
+
+```json
+{
+  "typ": "event_ticket",
+  "v": 1,
+  "ticketId": "TKT-ABC123",
+  "eventId": "evt-456",
+  "userId": "usr-789",
+  "iat": 1711929600,
+  "exp": 1714521600
+}
 ```
 
-### Run (Development)
+### Security Features
 
-```bash
-npm run dev
+- **JWT-signed tokens** — tamper-proof QR payloads
+- **Rate limiting** — prevents brute-force scanning
+- **Idempotent verification** — duplicate scans return `alreadyCheckedIn: true`
+- **Role-based access** — only Host/Admin can verify tickets
+- **Event scope validation** — ticket must match the scanned event
+
+---
+
+## 🔌 WebSocket Real-Time Events
+
+The server broadcasts these WebSocket events:
+
+| Event Type | Payload | Recipients |
+|------------|---------|------------|
+| `ticket_verified` | `{ ticket, event }` | Ticket owner, Host, Admin |
+| `new_notification` | `{ notification }` | Target user |
+| `new_message` | `{ message }` | Community members |
+| `booking_created` | `{ booking }` | Host of the event |
+
+### Client Connection
+
+```typescript
+const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const socket = new WebSocket(`${protocol}//${window.location.host}?userId=${userId}`);
+socket.onmessage = (event) => {
+  const payload = JSON.parse(event.data);
+  // Handle payload.type
+};
 ```
 
-### Build (Production Assets)
+### 💬 Real-Time Messaging & Sync Flow
 
-```bash
-npm run build
+```mermaid
+sequenceDiagram
+
+participant ActorA
+participant ActorB
+participant Backend
+participant WebSocket
+participant DB
+
+ActorA->>WebSocket: Send Message / Action
+WebSocket->>Backend: Forward
+Backend->>DB: Save Transaction
+Backend->>ActorB: Deliver Real-time Payload
+
+ActorB->>WebSocket: Acknowledge / Reply
+WebSocket->>Backend: Forward
+Backend->>DB: Save
+Backend->>ActorA: Deliver Update
 ```
 
-### Preview Built Frontend
+---
 
-```bash
-npm run preview
-```
+## 🧪 Test Credentials
 
-### Start Server
+The database is seeded with these test accounts:
 
-```bash
-npm run start
-```
+| Role | Email | Password |
+|------|-------|----------|
+| **Student** | `student@eventhub.com` | `password123` |
+| **Host** | `host@eventhub.com` | `password123` |
+| **Admin** | `admin@eventhub.com` | `password123` |
+| **Sponsor** | `sponsor@eventhub.com` | `password123` |
 
-### Type Check
+> ⚠️ These are development-only credentials. Never use in production.
 
-```bash
-npm run lint
-```
+---
 
-## Workflow Notes
+## 🎨 Design System
 
-- Development entrypoint uses tsx server.ts, so backend and Vite dev behavior are coordinated from one process.
-- Backend defaults to port 3000 and hosts API plus frontend.
-- SQLite file events.db is local and mutable; keep backups before risky schema experiments.
-- Upload handling accepts JPEG/PNG/WEBP with configured size limits in server middleware.
-- Role model currently supports student, host, admin, sponsor.
+EventHub uses the **"Nocturnal Architect"** design system:
 
-## Best Practices for Contributing and Extending
+- **Theme:** Premium dark mode with light mode toggle
+- **Primary Color:** Brand green (`hsl(var(--brand-500))`)
+- **Typography:** `font-display` (bold uppercase) + `font-serif` (italic accents)
+- **Components:** Glass morphism (`.glass`), luxury inputs (`.input-luxury`), `.btn-luxury` buttons
+- **Micro Labels:** `.micro-label` — uppercase tracking-widest small labels
+- **Cards:** `.rounded-[3rem]` with subtle border and shadow
 
-1. Keep architecture boundaries explicit
+---
 
-- Add backend logic in focused modules instead of growing server.ts further.
-- Add frontend pages/components outside App.tsx and compose through routes.
+## 🤝 Contributing
 
-2. Maintain contract consistency
+1. **Fork** the repository
+2. **Create** a feature branch: `git checkout -b feature/my-feature`
+3. **Commit** your changes: `git commit -m "Add my feature"`
+4. **Push** to the branch: `git push origin feature/my-feature`
+5. **Open** a Pull Request
 
-- Update src/types.ts whenever backend response payloads change.
-- Prefer explicit response schemas and centralized API helpers.
+### Code Style
 
-3. Protect data integrity
+- All frontend code lives in `src/App.tsx` (monolith SPA)
+- Backend API routes are in `server.ts`
+- Follow the existing "Nocturnal Architect" design patterns
+- Use TypeScript strict mode
+- Add proper error handling for all API calls
 
-- For DB changes, update db.ts migration-safe logic first.
-- Use transactions for multi-step writes (bookings, bidding, waitlist promotions).
+---
 
-4. Respect role-based access
+## 📄 License
 
-- Add authorization checks server-side for all new sensitive routes.
-- Treat frontend role gating as UX only, not security.
+This project is built for educational purposes as a college event management platform.
 
-5. Preserve reproducibility
+---
 
-- Commit package-lock.json with dependency updates.
-- Avoid manual edits in dist/, node_modules/, and .git/.
-
-6. Improve maintainability incrementally
-
-- Break large features into dedicated directories (for example src/features/_, server/routes/_).
-- Add tests for critical flows before broad refactors.
-
-7. Document changes
-
-- Update this README when adding new directories, build steps, or runtime services.
+<p align="center">Built with ❤️ for campus life — EventHub © 2026</p>

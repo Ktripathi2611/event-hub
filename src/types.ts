@@ -77,6 +77,12 @@ export interface Booking {
   checked_in?: number;
   checked_in_at?: string;
   checked_in_by?: string;
+  ticket_id?: string;
+  ticket_status?: 'pending' | 'verified';
+  ticket_verification_status?: 'PENDING_VERIFICATION' | 'VERIFIED_ATTENDANCE';
+  ticket_issued_at?: string;
+  ticket_verified_at?: string;
+  ticket_expires_at?: string;
   created_at: string;
   event_name?: string;
   event_date?: string;
@@ -84,6 +90,25 @@ export interface Booking {
   ticket_type_name?: string;
   user_name?: string;
   user_email?: string;
+}
+
+export interface TicketRecord {
+  id: string;
+  ticket_id: string;
+  booking_id: string;
+  user_id: string;
+  event_id: string;
+  status: 'pending' | 'verified';
+  verification_status?: 'PENDING_VERIFICATION' | 'VERIFIED_ATTENDANCE';
+  issued_at: string;
+  verified_at?: string;
+  verified_by?: string;
+  expires_at?: string;
+  booking_ref?: string;
+  event_name?: string;
+  event_date?: string;
+  venue?: string;
+  ticket_type_name?: string;
 }
 
 export interface Review {

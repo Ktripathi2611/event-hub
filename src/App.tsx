@@ -35,7 +35,9 @@ import {
   ScanLine,
   Building2,
   Handshake,
-  Gavel
+  Gavel,
+  AlertTriangle,
+  Wifi
 } from 'lucide-react';
 import { motion, AnimatePresence, useScroll, useTransform, useSpring } from 'motion/react';
 import {
@@ -58,6 +60,7 @@ import {
   SponsorshipRequest,
   Deal,
   DealMessage,
+  TicketRecord,
 } from './types';
 import { Html5Qrcode } from 'html5-qrcode';
 import { LineChart, Line, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
@@ -78,6 +81,11 @@ const emitSponsorshipSync = () => {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('sponsorship:sync'));
   }
+};
+
+const createUserSocket = (userId: string) => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return new WebSocket(`${protocol}//${window.location.host}?userId=${userId}`);
 };
 
 // --- Theme Context ---
@@ -294,8 +302,7 @@ const Navbar = ({ user, onLogout }: { user: UserType | null, onLogout: () => voi
     };
     window.addEventListener('sponsorship:sync', syncHandler);
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${window.location.host}?userId=${user.id}`);
+    const socket = createUserSocket(user.id);
     socket.onmessage = (event) => {
       const payload = JSON.parse(event.data);
       if (payload.type === 'notification' && payload.data) {
@@ -345,6 +352,7 @@ const Navbar = ({ user, onLogout }: { user: UserType | null, onLogout: () => voi
     if (user.role === 'admin') {
       navLinks.push({ name: 'Admin Panel', path: '/admin/dashboard', icon: ShieldCheck });
       navLinks.push({ name: 'Sponsorship Admin', path: '/admin/sponsorship', icon: Building2 });
+      navLinks.push({ name: 'Scanner', path: '/host/scanner', icon: ScanLine });
     }
   }
 
@@ -987,7 +995,16 @@ const Profile = ({ user, onUpdate }: { user: UserType | null, onUpdate: (u: User
   const [message, setMessage] = useState('');
   const [followers, setFollowers] = useState<UserType[]>([]);
   const [following, setFollowing] = useState<UserType[]>([]);
+  const [tickets, setTickets] = useState<TicketRecord[]>([]);
   const navigate = useNavigate();
+
+  const loadTickets = async (userId: string) => {
+    const ticketsRes = await fetch(`/api/tickets/user/${userId}`, withAuth());
+    if (ticketsRes.ok) {
+      const rows = await ticketsRes.json();
+      setTickets(Array.isArray(rows) ? rows : []);
+    }
+  };
 
   useEffect(() => {
     if (!user) {
@@ -1005,7 +1022,21 @@ const Profile = ({ user, onUpdate }: { user: UserType | null, onUpdate: (u: User
       if (referralRes.ok) setReferralStats(await referralRes.json());
     };
     fetchStats();
+    loadTickets(user.id);
+
+    const socket = createUserSocket(user.id);
+    socket.onmessage = (event) => {
+      const payload = JSON.parse(event.data);
+      if (payload.type === 'ticket_verified') {
+        loadTickets(user.id);
+      }
+    };
+
+    return () => socket.close();
   }, [user]);
+
+  const attendedTickets = tickets.filter((t) => t.status === 'verified');
+  const registeredTickets = tickets.filter((t) => t.status === 'pending');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1108,6 +1139,55 @@ const Profile = ({ user, onUpdate }: { user: UserType | null, onUpdate: (u: User
               </button>
               {message && <p className="text-center micro-label text-brand-500">{message}</p>}
             </form>
+          </div>
+
+          <div className="glass p-12 rounded-[3rem] border border-(--line-color)">
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
+              <h2 className="font-display font-bold text-3xl uppercase tracking-tight">Attendance Overview</h2>
+              <div className="text-xs uppercase tracking-[0.2em] text-(--text-secondary)">
+                {attendedTickets.length} attended / {registeredTickets.length} pending
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="rounded-3xl border border-emerald-500/30 bg-emerald-500/10 p-6">
+                <div className="micro-label mb-4">Attended Events</div>
+                {attendedTickets.length ? (
+                  <div className="space-y-4">
+                    {attendedTickets.slice(0, 6).map((ticket) => (
+                      <div key={ticket.id} className="rounded-2xl border border-emerald-500/20 bg-black/20 p-4">
+                        <div className="font-bold">{ticket.event_name}</div>
+                        <div className="text-xs text-(--text-secondary) mt-1">{ticket.ticket_id}</div>
+                        <div className="inline-flex items-center gap-2 mt-3 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold uppercase tracking-widest">
+                          <CheckCircle className="w-3.5 h-3.5" /> Verified Attendance
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-(--text-secondary)">No attended events yet.</p>
+                )}
+              </div>
+
+              <div className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-6">
+                <div className="micro-label mb-4">Registered Events</div>
+                {registeredTickets.length ? (
+                  <div className="space-y-4">
+                    {registeredTickets.slice(0, 6).map((ticket) => (
+                      <div key={ticket.id} className="rounded-2xl border border-amber-500/20 bg-black/20 p-4">
+                        <div className="font-bold">{ticket.event_name}</div>
+                        <div className="text-xs text-(--text-secondary) mt-1">{ticket.ticket_id}</div>
+                        <div className="inline-flex items-center gap-2 mt-3 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold uppercase tracking-widest">
+                          <Clock className="w-3.5 h-3.5" /> Pending Verification
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-(--text-secondary)">No active registrations.</p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1832,18 +1912,36 @@ const MyBookings = ({ user }: { user: UserType | null }) => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  const loadBookings = async () => {
+    if (!user) return;
+    const res = await fetch(`/api/bookings/user/${user.id}`, withAuth());
+    const data = await res.json();
+    setBookings(Array.isArray(data) ? data : []);
+    setLoading(false);
+  };
+
   useEffect(() => {
     if (!user) {
       navigate('/login');
       return;
     }
-    fetch(`/api/bookings/user/${user.id}`, withAuth())
-      .then(res => res.json())
-      .then(data => {
-        setBookings(data);
-        setLoading(false);
-      });
+
+    loadBookings();
+
+    const socket = createUserSocket(user.id);
+    socket.onmessage = (event) => {
+      const payload = JSON.parse(event.data);
+      if (payload.type === 'ticket_verified') {
+        loadBookings();
+      }
+    };
+
+    return () => socket.close();
   }, [user]);
+
+  const attendedBookings = bookings.filter((b) => b.ticket_status === 'verified' || b.checked_in === 1);
+  const registeredBookings = bookings.filter((b) => !(b.ticket_status === 'verified' || b.checked_in === 1));
+  const orderedBookings = [...attendedBookings, ...registeredBookings];
 
   return (
     <div className="pt-40 pb-32 max-w-7xl mx-auto px-6 lg:px-12">
@@ -1864,9 +1962,9 @@ const MyBookings = ({ user }: { user: UserType | null }) => {
             <Skeleton key={i} className="h-80 rounded-[3rem]" />
           ))}
         </div>
-      ) : bookings.length > 0 ? (
+      ) : orderedBookings.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-          {bookings.map((booking) => (
+          {orderedBookings.map((booking) => (
             <motion.div 
               key={booking.id} 
               whileHover={{ y: -10 }}
@@ -1879,6 +1977,9 @@ const MyBookings = ({ user }: { user: UserType | null }) => {
                       {booking.ticket_type_name}
                     </span>
                     <span className="text-(--text-secondary) text-[10px] font-bold uppercase tracking-[0.2em]">{booking.booking_ref}</span>
+                    {booking.ticket_id && (
+                      <span className="text-(--text-secondary) text-[10px] font-bold uppercase tracking-[0.2em]">{booking.ticket_id}</span>
+                    )}
                   </div>
                   <h3 className="font-display font-bold text-3xl mb-6 group-hover:text-brand-500 transition-colors tracking-tight uppercase leading-tight">{booking.event_name}</h3>
                   <div className="space-y-4">
@@ -1890,6 +1991,15 @@ const MyBookings = ({ user }: { user: UserType | null }) => {
                       <MapPin className="w-5 h-5 text-brand-500" />
                       <span className="line-clamp-1">{booking.venue}</span>
                     </div>
+                    {(booking.ticket_status === 'verified' || booking.checked_in === 1) ? (
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold uppercase tracking-widest">
+                        <CheckCircle className="w-3.5 h-3.5" /> Verified Attendance
+                      </div>
+                    ) : (
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-300 text-[10px] font-bold uppercase tracking-widest">
+                        <Clock className="w-3.5 h-3.5" /> Pending Verification
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between pt-10 mt-10 border-t border-(--line-color)">
@@ -1902,6 +2012,9 @@ const MyBookings = ({ user }: { user: UserType | null }) => {
                   <img src={booking.qr_code} alt="QR Code" className="w-32 h-32" />
                 </div>
                 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em] text-center">Scan at Entry</span>
+                <Link to={`/tickets/${booking.id}`} className="mt-4 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 hover:text-zinc-800 transition-colors">
+                  Open Ticket Page
+                </Link>
               </div>
             </motion.div>
           ))}
@@ -1920,11 +2033,124 @@ const MyBookings = ({ user }: { user: UserType | null }) => {
   );
 };
 
+const TicketPage = ({ user }: { user: UserType | null }) => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [booking, setBooking] = useState<Booking | null>(null);
+  const [justVerified, setJustVerified] = useState(false);
+
+  const loadBooking = () => {
+    if (!user) return;
+    fetch(`/api/bookings/user/${user.id}`, withAuth())
+      .then((res) => res.json())
+      .then((rows) => {
+        const found = Array.isArray(rows) ? rows.find((row: Booking) => row.id === id) : null;
+        if (!found) {
+          navigate('/my-bookings');
+          return;
+        }
+        setBooking(found);
+      });
+  };
+
+  useEffect(() => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+    loadBooking();
+
+    const socket = createUserSocket(user.id);
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'ticket_verified' && payload.data.bookingId === id) {
+          setJustVerified(true);
+          loadBooking();
+          setTimeout(() => setJustVerified(false), 8000);
+        }
+      } catch {}
+    };
+
+    return () => socket.close();
+  }, [user, id, navigate]);
+
+  if (!booking) {
+    return <div className="pt-40 text-center micro-label">Loading ticket...</div>;
+  }
+
+  const verified = booking.ticket_status === 'verified' || booking.checked_in === 1;
+
+  return (
+    <div className="pt-40 pb-24 max-w-3xl mx-auto px-6 lg:px-12">
+      <AnimatePresence>
+        {justVerified && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="mb-8 p-6 glass rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-center"
+          >
+            <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+            <div className="text-emerald-400 font-bold text-sm uppercase tracking-widest">Ticket Just Verified!</div>
+            <div className="text-sm text-(--text-secondary) mt-1">Your attendance has been confirmed in real-time.</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <motion.div layout className="glass rounded-[3rem] border border-(--line-color) p-10">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <div className="micro-label mb-2">Ticket Page</div>
+            <h1 className="font-display font-bold text-4xl tracking-tight uppercase">{booking.event_name}</h1>
+          </div>
+          <motion.div
+            key={verified ? 'verified' : 'pending'}
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+          >
+            {verified ? (
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold uppercase tracking-widest shadow-lg shadow-emerald-500/10">
+                <CheckCircle className="w-4 h-4" /> Verified Attendance
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-bold uppercase tracking-widest">
+                <Clock className="w-4 h-4" /> Pending Verification
+              </div>
+            )}
+          </motion.div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+          <div className="space-y-3 text-sm text-(--text-secondary)">
+            <div><span className="font-bold text-white">Booking:</span> {booking.booking_ref}</div>
+            <div><span className="font-bold text-white">Ticket ID:</span> {booking.ticket_id || 'Pending issuance'}</div>
+            <div><span className="font-bold text-white">Type:</span> {booking.ticket_type_name}</div>
+            <div><span className="font-bold text-white">Date:</span> {booking.event_date ? new Date(booking.event_date).toLocaleString() : 'TBD'}</div>
+            <div><span className="font-bold text-white">Venue:</span> {booking.venue}</div>
+          </div>
+          <div className="bg-white rounded-3xl p-6 flex items-center justify-center">
+            <img src={booking.qr_code} alt="Ticket QR" className="w-64 h-64" />
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const AdminDashboard = ({ user }: { user: UserType | null }) => {
   const [pendingEvents, setPendingEvents] = useState<EventType[]>([]);
   const [allEvents, setAllEvents] = useState<EventType[]>([]);
   const [reports, setReports] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'reports'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'reports' | 'attendance'>('pending');
+  const [attendanceEventId, setAttendanceEventId] = useState('');
+  const [attendanceFilter, setAttendanceFilter] = useState<'all' | 'verified' | 'pending'>('all');
+  const [attendanceRows, setAttendanceRows] = useState<Booking[]>([]);
+  const [attendanceSummary, setAttendanceSummary] = useState<{ total_registered: number; verified_attendees: number; pending_attendees: number } | null>(null);
+  const [manualVerifyTicketId, setManualVerifyTicketId] = useState('');
+  const [manualVerifyEmail, setManualVerifyEmail] = useState('');
+  const [manualVerifyStatus, setManualVerifyStatus] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -1935,10 +2161,35 @@ const AdminDashboard = ({ user }: { user: UserType | null }) => {
     fetchData();
   }, [user, activeTab]);
 
+  useEffect(() => {
+    if (activeTab !== 'attendance') return;
+    if (!attendanceEventId) return;
+
+    const filterQuery = attendanceFilter === 'all' ? '' : `?verified=${attendanceFilter}`;
+    fetch(`/api/events/${attendanceEventId}/attendees${filterQuery}`, withAuth())
+      .then(res => res.json())
+      .then(data => setAttendanceRows(Array.isArray(data) ? data : []));
+
+    fetch(`/api/events/${attendanceEventId}/tickets/summary`, withAuth())
+      .then(res => res.json())
+      .then((data) => setAttendanceSummary(data));
+  }, [activeTab, attendanceEventId, attendanceFilter]);
+
   const fetchData = () => {
     if (activeTab === 'pending') fetch('/api/admin/events/pending', withAuth()).then(res => res.json()).then(data => Array.isArray(data) ? setPendingEvents(data) : setPendingEvents([]));
     if (activeTab === 'all') fetch('/api/events').then(res => res.json()).then(data => Array.isArray(data) ? setAllEvents(data) : setAllEvents([]));
     if (activeTab === 'reports') fetch('/api/admin/reports', withAuth()).then(res => res.json()).then(data => Array.isArray(data) ? setReports(data) : setReports([]));
+    if (activeTab === 'attendance') {
+      fetch('/api/events')
+        .then(res => res.json())
+        .then((data) => {
+          const events = Array.isArray(data) ? data : [];
+          setAllEvents(events);
+          if (!attendanceEventId && events.length) {
+            setAttendanceEventId(events[0].id);
+          }
+        });
+    }
   };
 
   const handleAction = async (id: string, action: 'approve' | 'reject') => {
@@ -1955,6 +2206,42 @@ const AdminDashboard = ({ user }: { user: UserType | null }) => {
   const handleReportAction = async (id: string, action: 'approve' | 'dismiss') => {
     const res = await fetch(`/api/admin/reports/${id}/${action}`, withAuth({ method: 'POST' }));
     if (res.ok) fetchData();
+  };
+
+  const verifyAttendanceManual = async () => {
+    if (!attendanceEventId || (!manualVerifyTicketId && !manualVerifyEmail)) {
+      setManualVerifyStatus('Provide event and ticket/email first.');
+      return;
+    }
+
+    const res = await fetch('/api/tickets/verify-manual', withAuth({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event_id: attendanceEventId,
+        ticketId: manualVerifyTicketId || undefined,
+        email: manualVerifyEmail || undefined,
+      }),
+    }));
+
+    const data = await res.json();
+    if (res.ok) {
+      setManualVerifyStatus(data.alreadyCheckedIn ? 'Already checked in.' : 'Attendance verified successfully.');
+      setManualVerifyTicketId('');
+      setManualVerifyEmail('');
+      if (activeTab === 'attendance') {
+        const filterQuery = attendanceFilter === 'all' ? '' : `?verified=${attendanceFilter}`;
+        const [rowsRes, summaryRes] = await Promise.all([
+          fetch(`/api/events/${attendanceEventId}/attendees${filterQuery}`, withAuth()),
+          fetch(`/api/events/${attendanceEventId}/tickets/summary`, withAuth()),
+        ]);
+        setAttendanceRows(await rowsRes.json());
+        setAttendanceSummary(await summaryRes.json());
+      }
+      return;
+    }
+
+    setManualVerifyStatus(data.error || 'Manual verification failed.');
   };
 
   return (
@@ -1989,6 +2276,12 @@ const AdminDashboard = ({ user }: { user: UserType | null }) => {
             className={`px-6 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'reports' ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/20' : 'text-(--text-secondary) hover:bg-white/5'}`}
           >
             Reports
+          </button>
+          <button
+            onClick={() => setActiveTab('attendance')}
+            className={`px-6 py-3 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'attendance' ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/20' : 'text-(--text-secondary) hover:bg-white/5'}`}
+          >
+            Attendance
           </button>
         </div>
       </div>
@@ -2168,6 +2461,93 @@ const AdminDashboard = ({ user }: { user: UserType | null }) => {
                 <p className="text-(--text-secondary) text-lg font-medium">No active reports to review.</p>
               </div>
             )}
+          </>
+        )}
+
+        {activeTab === 'attendance' && (
+          <>
+            <div className="p-10 border-b border-(--line-color) bg-white/5 space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <h2 className="font-display font-bold text-2xl uppercase tracking-tight">Attendance Verification</h2>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setAttendanceFilter('all')} className={`btn-outline-luxury py-2 px-4 text-xs ${attendanceFilter === 'all' ? 'bg-white/10' : ''}`}>All</button>
+                  <button onClick={() => setAttendanceFilter('verified')} className={`btn-outline-luxury py-2 px-4 text-xs ${attendanceFilter === 'verified' ? 'bg-emerald-500/20 border-emerald-500/40' : ''}`}>Verified</button>
+                  <button onClick={() => setAttendanceFilter('pending')} className={`btn-outline-luxury py-2 px-4 text-xs ${attendanceFilter === 'pending' ? 'bg-amber-500/20 border-amber-500/40' : ''}`}>Not Verified</button>
+                </div>
+              </div>
+
+              <select
+                value={attendanceEventId}
+                onChange={(e) => setAttendanceEventId(e.target.value)}
+                className="input-luxury"
+              >
+                <option value="">Select event</option>
+                {allEvents.map((event) => (
+                  <option key={event.id} value={event.id}>{event.name}</option>
+                ))}
+              </select>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="glass rounded-2xl border border-(--line-color) p-4">
+                  <div className="micro-label">Total Registered</div>
+                  <div className="text-2xl font-bold mt-1">{attendanceSummary?.total_registered ?? 0}</div>
+                </div>
+                <div className="glass rounded-2xl border border-emerald-500/30 p-4">
+                  <div className="micro-label">Verified</div>
+                  <div className="text-2xl font-bold mt-1 text-emerald-400">{attendanceSummary?.verified_attendees ?? 0}</div>
+                </div>
+                <div className="glass rounded-2xl border border-amber-500/30 p-4">
+                  <div className="micro-label">Not Verified</div>
+                  <div className="text-2xl font-bold mt-1 text-amber-300">{attendanceSummary?.pending_attendees ?? 0}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input
+                  value={manualVerifyTicketId}
+                  onChange={(e) => setManualVerifyTicketId(e.target.value)}
+                  className="input-luxury"
+                  placeholder="Manual verify by ticket ID"
+                />
+                <input
+                  value={manualVerifyEmail}
+                  onChange={(e) => setManualVerifyEmail(e.target.value)}
+                  className="input-luxury"
+                  placeholder="or attendee email"
+                />
+                <button onClick={verifyAttendanceManual} className="btn-luxury py-3 text-sm">Verify Attendance</button>
+              </div>
+              {manualVerifyStatus && <div className="text-xs uppercase tracking-[0.2em] text-(--text-secondary)">{manualVerifyStatus}</div>}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-white/5">
+                    <th className="p-8 micro-label">Name</th>
+                    <th className="p-8 micro-label">Email</th>
+                    <th className="p-8 micro-label">Ticket</th>
+                    <th className="p-8 micro-label">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-(--line-color)">
+                  {attendanceRows.map((row) => (
+                    <tr key={row.id} className="hover:bg-white/5 transition-colors">
+                      <td className="p-8 font-medium">{row.user_name}</td>
+                      <td className="p-8 text-(--text-secondary)">{row.user_email}</td>
+                      <td className="p-8 text-(--text-secondary)">{row.ticket_id || row.booking_ref}</td>
+                      <td className="p-8">
+                        {(row.ticket_status === 'verified' || row.checked_in) ? (
+                          <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border bg-emerald-500/10 text-emerald-500 border-emerald-500/20">Verified</span>
+                        ) : (
+                          <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border bg-amber-500/10 text-amber-400 border-amber-500/20">Pending</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </div>
@@ -3233,58 +3613,333 @@ const HostDashboard = ({ user }: { user: UserType | null }) => {
 
 const HostScanner = ({ user }: { user: UserType | null }) => {
   const navigate = useNavigate();
-  const [eventId, setEventId] = useState('');
+  const [hostEvents, setHostEvents] = useState<EventType[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState('');
   const [lastResult, setLastResult] = useState<any>(null);
+  const [scanHistory, setScanHistory] = useState<any[]>([]);
+  const [summary, setSummary] = useState<{ total_registered: number; verified_attendees: number; pending_attendees: number } | null>(null);
+  const [manualTicketId, setManualTicketId] = useState('');
+  const [manualEmail, setManualEmail] = useState('');
+  const [manualLoading, setManualLoading] = useState(false);
+  const [scannerActive, setScannerActive] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isProcessingScanRef = useRef(false);
 
+  // Fetch host's events
   useEffect(() => {
-    if (!user || user.role !== 'host') {
+    if (!user || !['host', 'admin'].includes(user.role)) {
       navigate('/');
       return;
     }
-
-    const scanner = new Html5Qrcode('qr-reader');
-    scannerRef.current = scanner;
-    scanner
-      .start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 280, height: 280 } },
-        async (decodedText) => {
-          if (!eventId) return;
-          const res = await fetch('/api/bookings/check-in', withAuth({
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bookingRef: decodedText, event_id: eventId, host_id: user.id }),
-          }));
-          const data = await res.json();
-          setLastResult(data);
-        },
-        () => {}
-      )
-      .catch(() => {
-        setLastResult({ error: 'Camera unavailable. Check permissions.' });
+    fetch('/api/events', withAuth())
+      .then((res) => res.json())
+      .then((data) => {
+        const events = Array.isArray(data) ? data : [];
+        const filtered = user.role === 'admin' ? events : events.filter((e: any) => e.host_id === user.id);
+        setHostEvents(filtered);
+        if (filtered.length > 0 && !selectedEventId) {
+          setSelectedEventId(filtered[0].id);
+        }
       });
+  }, [user, navigate]);
+
+  // Update summary when event changes or after a scan
+  useEffect(() => {
+    if (!selectedEventId) return;
+    const loadSummary = () => {
+      fetch(`/api/events/${selectedEventId}/tickets/summary`, withAuth())
+        .then((res) => res.json())
+        .then((data) => setSummary(data))
+        .catch(() => {});
+    };
+    loadSummary();
+  }, [selectedEventId, lastResult]);
+
+  const [latestRemoteScan, setLatestRemoteScan] = useState<string | null>(null);
+
+  // WebSocket for real-time updates
+  useEffect(() => {
+    if (!user || !selectedEventId) return;
+    const ws = createUserSocket(user.id);
+    
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'ticket_verified' && message.data.eventId === selectedEventId) {
+          // Re-fetch summary to get latest counts
+          fetch(`/api/events/${selectedEventId}/tickets/summary`, withAuth())
+            .then((res) => res.json())
+            .then((data) => setSummary(data))
+            .catch(() => {});
+
+          // If it's a remote scan (not by us), add to history
+          // Note: We can tell if it's "us" if we just performed a scan, 
+          // but simpler is to just check if we want to show ALL scans.
+          // For now, let's show all scans but mark them as "Remote" if they come via WS.
+          const isLocal = lastResult && lastResult.raw?.ticket?.ticket_id === message.data.ticketId;
+          
+          if (!isLocal) {
+            const remoteResult = {
+              tone: 'success',
+              title: 'Remote Verification',
+              detail: `${message.data.userName} verified (${message.data.ticketType})`,
+              name: message.data.userName,
+              time: new Date().toLocaleTimeString(),
+              isRemote: true,
+              raw: { ticket: { ticket_id: message.data.ticketId } }
+            };
+            setScanHistory((prev) => [remoteResult, ...prev].slice(0, 20));
+            setLatestRemoteScan(message.data.userName);
+            setTimeout(() => setLatestRemoteScan(null), 5000);
+          }
+        }
+      } catch (err) {
+        console.error('WS Error:', err);
+      }
+    };
+
+    return () => ws.close();
+  }, [user, selectedEventId, lastResult]);
+
+  // Initialize camera scanner
+  useEffect(() => {
+    if (!selectedEventId || !user) return;
+    const timeout = setTimeout(() => {
+      const el = document.getElementById('qr-reader');
+      if (!el) return;
+      const scanner = new Html5Qrcode('qr-reader');
+      scannerRef.current = scanner;
+      scanner
+        .start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 280, height: 280 } },
+          async (decodedText) => {
+            if (!selectedEventId || isProcessingScanRef.current) return;
+            isProcessingScanRef.current = true;
+            try {
+              const res = await fetch('/api/tickets/verify', withAuth({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ qrData: decodedText, event_id: selectedEventId, source: 'scanner' }),
+              }));
+              const data = await res.json();
+              let result: any;
+              if (res.ok) {
+                result = data.alreadyCheckedIn
+                  ? { tone: 'warning', title: 'Already Checked In', detail: data.ticket?.ticket_id || 'Duplicate scan.', name: data.ticket?.user_name || 'Unknown', time: new Date().toLocaleTimeString(), raw: data }
+                  : { tone: 'success', title: 'Verification Success', detail: `${data.ticket?.user_name || 'Student'} verified`, name: data.ticket?.user_name || 'Student', time: new Date().toLocaleTimeString(), raw: data };
+              } else {
+                result = { tone: 'error', title: 'Invalid Ticket', detail: data.error || 'Verification failed.', name: 'N/A', time: new Date().toLocaleTimeString(), raw: data };
+              }
+              setLastResult(result);
+              setScanHistory((prev) => [result, ...prev].slice(0, 20));
+            } finally {
+              window.setTimeout(() => { isProcessingScanRef.current = false; }, 800);
+            }
+          },
+          () => {}
+        )
+        .then(() => setScannerActive(true))
+        .catch(() => {
+          setLastResult({ tone: 'error', title: 'Camera Unavailable', detail: 'Check browser camera permissions.', time: new Date().toLocaleTimeString() });
+        });
+    }, 200);
 
     return () => {
+      clearTimeout(timeout);
       if (scannerRef.current?.isScanning) {
         scannerRef.current.stop().catch(() => {});
       }
       scannerRef.current?.clear();
+      setScannerActive(false);
     };
-  }, [user, navigate, eventId]);
+  }, [selectedEventId, user]);
+
+  const verifyManual = async () => {
+    if (!selectedEventId || (!manualTicketId && !manualEmail)) return;
+    setManualLoading(true);
+    const res = await fetch('/api/tickets/verify-manual', withAuth({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_id: selectedEventId, ticketId: manualTicketId || undefined, email: manualEmail || undefined }),
+    }));
+    const data = await res.json();
+    setManualLoading(false);
+    const result: any = res.ok
+      ? { tone: data.alreadyCheckedIn ? 'warning' : 'success', title: data.alreadyCheckedIn ? 'Already Checked In' : 'Manual Verification Success', detail: data.ticket?.ticket_id || 'Done.', name: data.ticket?.user_name || 'Student', time: new Date().toLocaleTimeString(), raw: data }
+      : { tone: 'error', title: 'Manual Verification Failed', detail: data.error || 'Unable to verify.', name: 'N/A', time: new Date().toLocaleTimeString(), raw: data };
+    setLastResult(result);
+    setScanHistory((prev) => [result, ...prev].slice(0, 20));
+    if (res.ok) { setManualTicketId(''); setManualEmail(''); }
+  };
+
+  const selectedEvent = hostEvents.find((e) => e.id === selectedEventId);
 
   return (
-    <div className="pt-40 pb-24 max-w-5xl mx-auto px-6 lg:px-12">
-      <div className="micro-label mb-4">Entry Ops</div>
-      <h1 className="font-display font-bold text-5xl tracking-tight uppercase mb-8">QR Ticket Scanner</h1>
-      <div className="glass p-8 rounded-3xl border border-(--line-color) mb-8">
-        <label className="micro-label block mb-2">Event ID for validation</label>
-        <input value={eventId} onChange={(e) => setEventId(e.target.value)} className="input-luxury" placeholder="Enter event ID" />
+    <div className="pt-40 pb-24 max-w-6xl mx-auto px-6 lg:px-12">
+      <div className="flex items-end justify-between mb-12">
+        <div>
+          <div className="micro-label mb-4">Entry Ops</div>
+          <h1 className="font-display font-bold text-5xl tracking-tight uppercase mb-4">QR Ticket <span className="italic font-serif normal-case font-normal text-brand-500">Scanner</span></h1>
+          <p className="text-(--text-secondary) text-lg font-medium">Scan QR codes or verify tickets manually at the event gate.</p>
+        </div>
+        {scannerActive && (
+          <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold uppercase tracking-widest">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> Scanner Active
+          </div>
+        )}
       </div>
-      <div id="qr-reader" className="glass rounded-3xl border border-(--line-color) p-4" />
-      {lastResult && (
-        <div className="mt-6 glass p-6 rounded-2xl border border-(--line-color)">
-          <pre className="text-xs whitespace-pre-wrap">{JSON.stringify(lastResult, null, 2)}</pre>
+
+      {/* Event Selector + Stats */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div className="lg:col-span-2 glass p-6 rounded-3xl border border-(--line-color)">
+          <label className="micro-label block mb-3">Select Event</label>
+          {hostEvents.length > 0 ? (
+            <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)} className="input-luxury appearance-none">
+              {hostEvents.map((ev) => (
+                <option key={ev.id} value={ev.id}>{ev.name} — {new Date(ev.date).toLocaleDateString()}</option>
+              ))}
+            </select>
+          ) : (
+            <div className="text-(--text-secondary) text-sm py-3">No events found. Create an event first.</div>
+          )}
+          {selectedEvent && (
+            <div className="mt-4 flex items-center gap-4 text-xs text-(--text-secondary)">
+              <span className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-brand-500" /> {selectedEvent.venue}</span>
+              <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-brand-500" /> {new Date(selectedEvent.date).toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+        {summary && (
+          <div className="glass p-6 rounded-3xl border border-(--line-color) relative overflow-hidden">
+            <div className="micro-label mb-4">Live Attendance</div>
+            <div className="text-4xl font-display font-bold text-brand-500 mb-1">
+              {summary.verified_attendees}<span className="text-lg text-(--text-secondary) font-normal"> / {summary.total_registered}</span>
+            </div>
+            
+            <AnimatePresence>
+              {latestRemoteScan && (
+                <motion.div 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-500 text-[10px] font-bold uppercase tracking-widest"
+                >
+                  <Wifi className="w-3 h-3 animate-pulse" /> {latestRemoteScan}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden mt-3 mb-3">
+              <motion.div initial={{ width: 0 }} animate={{ width: `${summary.total_registered > 0 ? (summary.verified_attendees / summary.total_registered) * 100 : 0}%` }} className="bg-brand-500 h-full rounded-full shadow-[0_0_10px_rgba(var(--brand-500-rgb),0.3)]" />
+            </div>
+            <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-(--text-secondary)">
+              <span className="text-emerald-400">{summary.verified_attendees} Verified</span>
+              <span className="text-amber-300">{summary.pending_attendees} Pending</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Scanner + Result */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div>
+          <div id="qr-reader" className="glass rounded-3xl border border-(--line-color) overflow-hidden" />
+        </div>
+        <div className="flex flex-col gap-6">
+          <AnimatePresence mode="wait">
+            {lastResult && (
+              <motion.div
+                key={lastResult.time + lastResult.title}
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                className={`glass p-8 rounded-3xl border ${lastResult.tone === 'success' ? 'border-emerald-500/40 shadow-lg shadow-emerald-500/10' : lastResult.tone === 'warning' ? 'border-amber-500/40 shadow-lg shadow-amber-500/10' : 'border-rose-500/40 shadow-lg shadow-rose-500/10'}`}
+              >
+                <div className="flex items-start gap-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${lastResult.tone === 'success' ? 'bg-emerald-500/20' : lastResult.tone === 'warning' ? 'bg-amber-500/20' : 'bg-rose-500/20'}`}>
+                    {lastResult.tone === 'success' ? <CheckCircle className="w-6 h-6 text-emerald-400" /> : lastResult.tone === 'warning' ? <Clock className="w-6 h-6 text-amber-400" /> : <XCircle className="w-6 h-6 text-rose-400" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-lg mb-1">{lastResult.title}</div>
+                    <div className="text-sm text-(--text-secondary) break-all">{lastResult.detail}</div>
+                    <div className="text-[10px] text-(--text-secondary) mt-2 uppercase tracking-widest">{lastResult.time}</div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <div className="glass p-6 rounded-3xl border border-(--line-color)">
+            <div className="micro-label mb-4">Manual Verification Fallback</div>
+            <div className="grid grid-cols-1 gap-3">
+              <input value={manualTicketId} onChange={(e) => setManualTicketId(e.target.value)} className="input-luxury" placeholder="Ticket ID (e.g. TKT-...)" />
+              <input value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} className="input-luxury" placeholder="Student email" />
+            </div>
+            <button onClick={verifyManual} disabled={manualLoading || !selectedEventId} className="btn-luxury mt-4 w-full py-3 text-sm">
+              {manualLoading ? 'Verifying...' : 'Verify Manually'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Scan History */}
+      {scanHistory.length > 0 && (
+        <div className="glass p-8 rounded-3xl border border-(--line-color) relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 pointer-events-none opacity-5">
+            <Clock className="w-24 h-24" />
+          </div>
+          
+          <div className="flex items-center justify-between mb-8 relative">
+            <div>
+              <div className="micro-label mb-1">Session Log</div>
+              <h3 className="font-display font-bold text-xl uppercase tracking-tight">Recent Scans</h3>
+            </div>
+            <button 
+              onClick={() => setScanHistory([])} 
+              className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-bold text-(--text-secondary) hover:text-white hover:bg-white/10 uppercase tracking-widest transition-all"
+            >
+              Clear Log
+            </button>
+          </div>
+
+          <div className="space-y-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+            <AnimatePresence initial={false}>
+              {scanHistory.map((entry, idx) => (
+                <motion.div 
+                  key={idx + (entry.raw?.ticket?.id || entry.time)}
+                  initial={{ opacity: 0, x: -20, scale: 0.98 }}
+                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className={`flex items-center gap-5 p-5 rounded-[2.5rem] border transition-all hover:scale-[1.01] ${
+                    entry.tone === 'success' 
+                      ? 'border-emerald-500/20 bg-emerald-500/5' 
+                      : entry.tone === 'warning' 
+                        ? 'border-amber-500/20 bg-amber-500/5' 
+                        : 'border-rose-500/20 bg-rose-500/5'
+                  }`}
+                >
+                  <div className={`w-10 h-10 rounded-[1.25rem] flex items-center justify-center shrink-0 shadow-lg ${
+                    entry.tone === 'success' ? 'bg-emerald-500/20 shadow-emerald-500/5' : entry.tone === 'warning' ? 'bg-amber-500/20 shadow-amber-500/5' : 'bg-rose-500/20 shadow-rose-500/5'
+                  }`}>
+                    {entry.isRemote ? <Wifi className="w-5 h-5 text-brand-500" /> : (entry.tone === 'success' ? <CheckCircle className="w-5 h-5 text-emerald-400" /> : entry.tone === 'warning' ? <Clock className="w-5 h-5 text-amber-400" /> : <XCircle className="w-5 h-5 text-rose-400" />)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-sm font-bold truncate tracking-tight">{entry.title}</span>
+                      {entry.isRemote && <span className="text-[9px] font-black bg-brand-500/20 text-brand-500 px-2 py-0.5 rounded-full uppercase tracking-widest">Remote</span>}
+                      <span className="text-[9px] font-bold text-(--text-secondary) opacity-40 uppercase tracking-widest ml-auto shrink-0">{entry.time}</span>
+                    </div>
+                    <div className="text-[11px] text-(--text-secondary) truncate opacity-70 font-medium">{entry.detail}</div>
+                  </div>
+                  {entry.raw?.ticket?.ticket_id && (
+                    <div className="hidden sm:block px-3 py-1.5 rounded-2xl bg-white/5 border border-white/10 group-hover:bg-white/10 transition-colors">
+                      <div className="text-[9px] font-black font-mono text-(--text-secondary) opacity-40 uppercase tracking-tighter">{entry.raw.ticket.ticket_id}</div>
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
         </div>
       )}
     </div>
@@ -3295,39 +3950,77 @@ const HostAttendees = ({ user }: { user: UserType | null }) => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [attendees, setAttendees] = useState<Booking[]>([]);
+  const [summary, setSummary] = useState<{ total_registered: number; verified_attendees: number; pending_attendees: number } | null>(null);
+  const [filter, setFilter] = useState<'all' | 'verified' | 'pending'>('all');
+
+  const loadAttendees = async () => {
+    if (!id || !user) return;
+    const filterQuery = filter === 'all' ? '' : `?verified=${filter}`;
+    const [attendeeRes, summaryRes] = await Promise.all([
+      fetch(`/api/events/${id}/attendees${filterQuery}`, withAuth()),
+      fetch(`/api/events/${id}/tickets/summary`, withAuth()),
+    ]);
+
+    const attendeeRows = await attendeeRes.json();
+    setAttendees(Array.isArray(attendeeRows) ? attendeeRows : []);
+
+    if (summaryRes.ok) {
+      setSummary(await summaryRes.json());
+    }
+  };
 
   useEffect(() => {
-    if (!user || user.role !== 'host') {
+    if (!user || !['host', 'admin'].includes(user.role)) {
       navigate('/');
       return;
     }
     if (!id) return;
-    fetch(`/api/events/${id}/attendees?host_id=${user.id}`, withAuth()).then(res => res.json()).then(setAttendees);
-  }, [id, user, navigate]);
+    loadAttendees();
+  }, [id, user, navigate, filter]);
 
   const checkIn = async (bookingId: string) => {
-    if (!user) return;
+    if (!user || !id) return;
     const res = await fetch(`/api/bookings/${bookingId}/check-in`, withAuth({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ host_id: user.id }),
     }));
-    if (res.ok && id) {
-      const fresh = await fetch(`/api/events/${id}/attendees?host_id=${user.id}`, withAuth());
-      setAttendees(await fresh.json());
+    if (res.ok) {
+      await loadAttendees();
     }
   };
 
   return (
     <div className="pt-40 pb-24 max-w-6xl mx-auto px-6 lg:px-12">
       <h1 className="font-display font-bold text-4xl uppercase mb-8">Attendee Check-in List</h1>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="glass rounded-2xl border border-(--line-color) p-4">
+          <div className="micro-label">Total Registered</div>
+          <div className="text-3xl font-bold mt-2">{summary?.total_registered ?? attendees.length}</div>
+        </div>
+        <div className="glass rounded-2xl border border-emerald-500/30 p-4">
+          <div className="micro-label">Verified</div>
+          <div className="text-3xl font-bold mt-2 text-emerald-400">{summary?.verified_attendees ?? attendees.filter((a) => a.ticket_status === 'verified' || a.checked_in).length}</div>
+        </div>
+        <div className="glass rounded-2xl border border-amber-500/30 p-4">
+          <div className="micro-label">Not Verified</div>
+          <div className="text-3xl font-bold mt-2 text-amber-300">{summary?.pending_attendees ?? attendees.filter((a) => !(a.ticket_status === 'verified' || a.checked_in)).length}</div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={() => setFilter('all')} className={`btn-outline-luxury py-2 px-4 text-xs ${filter === 'all' ? 'bg-white/10' : ''}`}>All</button>
+        <button onClick={() => setFilter('verified')} className={`btn-outline-luxury py-2 px-4 text-xs ${filter === 'verified' ? 'bg-emerald-500/20 border-emerald-500/40' : ''}`}>Verified</button>
+        <button onClick={() => setFilter('pending')} className={`btn-outline-luxury py-2 px-4 text-xs ${filter === 'pending' ? 'bg-amber-500/20 border-amber-500/40' : ''}`}>Not Verified</button>
+      </div>
+
       <div className="glass rounded-3xl border border-(--line-color) overflow-hidden">
         <table className="w-full text-left">
           <thead className="bg-white/5">
             <tr>
               <th className="p-4 micro-label">Name</th>
               <th className="p-4 micro-label">Email</th>
-              <th className="p-4 micro-label">Booking Ref</th>
+              <th className="p-4 micro-label">Ticket</th>
               <th className="p-4 micro-label">Status</th>
               <th className="p-4 micro-label">Action</th>
             </tr>
@@ -3337,10 +4030,10 @@ const HostAttendees = ({ user }: { user: UserType | null }) => {
               <tr key={a.id} className="border-t border-(--line-color)">
                 <td className="p-4">{a.user_name}</td>
                 <td className="p-4">{a.user_email}</td>
-                <td className="p-4">{a.booking_ref}</td>
-                <td className="p-4">{a.checked_in ? 'Checked In' : 'Pending'}</td>
+                <td className="p-4">{a.ticket_id || a.booking_ref}</td>
+                <td className="p-4">{a.ticket_status === 'verified' || a.checked_in ? 'Verified' : 'Pending'}</td>
                 <td className="p-4">
-                  {!a.checked_in && <button className="btn-outline-luxury py-1 px-3 text-xs" onClick={() => checkIn(a.id)}>Check In</button>}
+                  {!(a.ticket_status === 'verified' || a.checked_in) && <button className="btn-outline-luxury py-1 px-3 text-xs" onClick={() => checkIn(a.id)}>Verify</button>}
                 </td>
               </tr>
             ))}
@@ -4295,6 +4988,82 @@ const AdminSponsorshipDashboard = ({ user }: { user: UserType | null }) => {
   );
 };
 
+const NotFound = () => {
+  const navigate = useNavigate();
+  return (
+    <div className="relative pt-32 pb-20 flex flex-col items-center justify-center min-h-[90vh] max-w-5xl mx-auto px-6 text-center overflow-hidden">
+      {/* Premium Background Elements */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -z-10 w-full h-full pointer-events-none opacity-20">
+        <div className="absolute top-0 left-1/4 w-72 h-72 bg-brand-500/30 blur-[100px] animate-pulse" />
+        <div className="absolute bottom-0 right-1/4 w-72 h-72 bg-indigo-500/20 blur-[100px] animate-pulse delay-1000" />
+      </div>
+
+      <motion.div
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ type: 'spring', damping: 20 }}
+        className="relative mb-10"
+      >
+        <div className="absolute inset-0 bg-brand-500/20 blur-3xl rounded-full" />
+        <div className="relative w-24 h-24 glass rounded-full flex items-center justify-center border border-white/10 shadow-2xl">
+          <AlertTriangle className="w-12 h-12 text-brand-500" strokeWidth={1} />
+        </div>
+      </motion.div>
+
+      <div className="relative z-10 w-full max-w-3xl">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex justify-center gap-1 mb-2"
+        >
+          {['4', '0', '4'].map((char, index) => (
+            <motion.span
+              key={index}
+              initial={{ y: 50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 + (index * 0.1), type: 'spring', stiffness: 200 }}
+              className={`font-display font-bold text-8xl md:text-[10rem] tracking-tighter uppercase ${index === 1 ? 'text-brand-500' : 'text-zinc-100'}`}
+            >
+              {char}
+            </motion.span>
+          ))}
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="px-4"
+        >
+          <h2 className="font-display font-bold text-2xl md:text-3xl uppercase tracking-[0.2em] mb-4">Lost in the Hub?</h2>
+          <p className="text-(--text-secondary) text-base md:text-lg font-medium mb-10 max-w-md mx-auto leading-relaxed opacity-80">
+            This event seems to have vanished into the digital void. Let's get you back to the main stage.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => navigate(-1)}
+              className="btn-outline-luxury w-full sm:w-64 py-4 text-xs uppercase tracking-widest font-bold"
+            >
+              Take a Step Back
+            </motion.button>
+            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.98 }} className="w-full sm:w-64">
+              <Link to="/" className="btn-luxury block w-full py-4 text-xs uppercase tracking-widest font-bold">
+                Return to Surface
+              </Link>
+            </motion.div>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* Subtle Grid Overlay */}
+      <div className="absolute inset-0 pointer-events-none opacity-5 -z-20" style={{ backgroundImage: 'radial-gradient(var(--brand-500) 1px, transparent 0)', backgroundSize: '40px 40px' }} />
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
@@ -4337,6 +5106,7 @@ export default function App() {
               <Route path="/login" element={<Login onLogin={handleLogin} />} />
               <Route path="/register" element={<Register onLogin={handleLogin} />} />
               <Route path="/my-bookings" element={<MyBookings user={user} />} />
+              <Route path="/tickets/:id" element={<TicketPage user={user} />} />
               <Route path="/wishlist" element={<WishlistPage user={user} />} />
               <Route path="/profile" element={<Profile user={user} onUpdate={handleUpdateUser} />} />
               <Route path="/host/dashboard" element={<HostDashboard user={user} />} />
@@ -4351,6 +5121,7 @@ export default function App() {
               <Route path="/communities" element={<Communities user={user} />} />
               <Route path="/communities/:id" element={<CommunityDetail user={user} />} />
               <Route path="/users/:id" element={<UserProfile user={user} />} />
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </main>
           

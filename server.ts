@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import db from './db.ts';
 import { v4 as uuidv4 } from 'uuid';
 import QRCode from 'qrcode';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
@@ -21,9 +22,29 @@ interface AuthPayload {
   role: UserRole;
 }
 
+interface TicketTokenPayload {
+  typ: 'event_ticket';
+  v: 1;
+  ticketId: string;
+  eventId: string;
+  userId: string;
+  bookingRef: string;
+}
+
+interface TicketVerifyResult {
+  success: boolean;
+  alreadyCheckedIn?: boolean;
+  ticket?: any;
+  error?: string;
+  statusCode?: number;
+}
+
+type VerificationStatus = 'PENDING_VERIFICATION' | 'VERIFIED_ATTENDANCE';
+
 type AuthedRequest = express.Request & { auth?: AuthPayload };
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-me';
+const TICKET_QR_TYPE = 'eventhub_ticket';
 if (!process.env.JWT_SECRET) {
   console.warn('JWT_SECRET is not set. Using an insecure development fallback secret.');
 }
@@ -84,6 +105,78 @@ const isSqliteConstraintError = (error: any) =>
   /SQLITE_CONSTRAINT|UNIQUE constraint failed/i.test(String(error?.message || ''));
 
 const generateReferralCode = () => `EH${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+const generateTicketId = () => `TKT-${crypto.randomBytes(10).toString('hex').toUpperCase()}`;
+
+const buildTicketExpiryIso = (eventDate: string | null | undefined) => {
+  const fallback = new Date();
+  fallback.setUTCDate(fallback.getUTCDate() + 30);
+
+  const parsed = eventDate ? Date.parse(eventDate) : NaN;
+  if (!Number.isFinite(parsed)) {
+    return fallback.toISOString();
+  }
+
+  const expiresAt = new Date(parsed);
+  expiresAt.setUTCHours(23, 59, 59, 999);
+  expiresAt.setUTCDate(expiresAt.getUTCDate() + 7);
+  return expiresAt.toISOString();
+};
+
+const buildTicketToken = (
+  payload: Omit<TicketTokenPayload, 'typ' | 'v'>,
+  expiresAtIso: string
+) => {
+  return jwt.sign(
+    {
+      typ: 'event_ticket',
+      v: 1,
+      ticketId: payload.ticketId,
+      eventId: payload.eventId,
+      userId: payload.userId,
+      bookingRef: payload.bookingRef,
+    } satisfies TicketTokenPayload,
+    JWT_SECRET,
+    { expiresIn: Math.max(60, Math.floor((Date.parse(expiresAtIso) - Date.now()) / 1000)) }
+  );
+};
+
+const buildTicketQrPayload = (token: string) => JSON.stringify({ type: TICKET_QR_TYPE, token });
+
+const toVerificationStatus = (value: string | null | undefined): VerificationStatus => {
+  return value === 'VERIFIED_ATTENDANCE' || value === 'verified' ? 'VERIFIED_ATTENDANCE' : 'PENDING_VERIFICATION';
+};
+
+const toLegacyTicketStatus = (value: string | null | undefined): 'pending' | 'verified' => {
+  return value === 'VERIFIED_ATTENDANCE' || value === 'verified' ? 'verified' : 'pending';
+};
+
+const withTicketStatusFields = (ticket: any) => {
+  if (!ticket) return ticket;
+  const verificationStatus = toVerificationStatus(ticket.verification_status || ticket.status);
+  return {
+    ...ticket,
+    status: toLegacyTicketStatus(verificationStatus),
+    verification_status: verificationStatus,
+  };
+};
+
+const parseTicketQrPayload = (rawText: string): { token: string | null; legacyBookingRef: string | null } => {
+  if (!rawText) return { token: null, legacyBookingRef: null };
+  try {
+    const parsed = JSON.parse(rawText);
+    if (parsed?.type === TICKET_QR_TYPE && typeof parsed?.token === 'string') {
+      return { token: parsed.token, legacyBookingRef: null };
+    }
+  } catch {
+    // Legacy scanner fallback accepts plain booking reference values.
+  }
+
+  if (/^EVT-[A-Z0-9]+$/.test(rawText.trim())) {
+    return { token: null, legacyBookingRef: rawText.trim() };
+  }
+
+  return { token: null, legacyBookingRef: null };
+};
 
 const authMiddleware: express.RequestHandler = (req: AuthedRequest, res, next) => {
   const authHeader = req.headers.authorization;
@@ -167,9 +260,26 @@ const signAccessToken = (userId: string, role: UserRole) => {
 
 const isHashedPassword = (value: string) => /^\$2[abxy]?\$\d{2}\$/.test(value);
 
+const getLocalIpv4Addresses = (): string[] => {
+  const interfaces = os.networkInterfaces();
+  const addresses: string[] = [];
+
+  for (const entries of Object.values(interfaces)) {
+    if (!entries) continue;
+    for (const entry of entries) {
+      if (entry.family === 'IPv4' && !entry.internal) {
+        addresses.push(entry.address);
+      }
+    }
+  }
+
+  return [...new Set(addresses)];
+};
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || '3000');
+  const HOST = process.env.HOST || '0.0.0.0';
   const server = createServer(app);
   const wss = new WebSocketServer({ server });
 
@@ -245,6 +355,213 @@ async function startServer() {
     db.prepare(
       'INSERT OR IGNORE INTO check_ins (id, booking_id, event_id, checked_in_by, check_in_source) VALUES (?, ?, ?, ?, ?)'
     ).run(id, bookingId, eventId, checkedInBy, source);
+  };
+
+  const getTicketByTicketId = (ticketId: string) => {
+    return db
+      .prepare(
+        `
+          SELECT
+            t.*,
+            b.booking_ref,
+            b.checked_in,
+            b.checked_in_at,
+            b.checked_in_by,
+            e.name as event_name,
+            e.date as event_date,
+            e.status as event_status,
+            e.host_id,
+            u.name as user_name,
+            u.email as user_email
+          FROM tickets t
+          JOIN bookings b ON b.id = t.booking_id
+          JOIN events e ON e.id = t.event_id
+          JOIN users u ON u.id = t.user_id
+          WHERE t.ticket_id = ?
+        `
+      )
+      .get(ticketId) as any;
+  };
+
+  const getTicketByBookingRef = (bookingRef: string, eventId?: string) => {
+    const clause = eventId ? 'AND b.event_id = ?' : '';
+    const params = eventId ? [bookingRef, eventId] : [bookingRef];
+    return db
+      .prepare(
+        `
+          SELECT
+            t.ticket_id
+          FROM bookings b
+          JOIN tickets t ON t.booking_id = b.id
+          WHERE b.booking_ref = ? ${clause}
+          LIMIT 1
+        `
+      )
+      .get(...params) as any;
+  };
+
+  const broadcastTicketUpdate = (ticket: any) => {
+    const normalized = withTicketStatusFields(ticket);
+    const payload = {
+      type: 'ticket_verified',
+      data: {
+        ticketId: normalized.ticket_id,
+        bookingId: normalized.booking_id,
+        eventId: normalized.event_id,
+        userId: normalized.user_id,
+        userName: normalized.user_name || 'Attendee',
+        ticketType: normalized.ticket_type_name || 'Standard',
+        status: normalized.status,
+        verificationStatus: normalized.verification_status,
+        verifiedAt: normalized.verified_at,
+      },
+    };
+
+    sendToUser(normalized.user_id, payload);
+    if (normalized.host_id) sendToUser(normalized.host_id, payload);
+
+    const admins = db.prepare("SELECT id FROM users WHERE role = 'admin'").all() as Array<{ id: string }>;
+    admins.forEach((admin) => sendToUser(admin.id, payload));
+  };
+
+  const verifyTicketByTicketId = (
+    ticketId: string,
+    verifierId: string,
+    verifierRole: UserRole,
+    source: 'scanner' | 'manual' | 'api',
+    expectedEventId?: string
+  ): TicketVerifyResult => {
+    const ticket = getTicketByTicketId(ticketId);
+    if (!ticket) {
+      return { success: false, error: 'Ticket not found', statusCode: 404 };
+    }
+
+    if (expectedEventId && ticket.event_id !== expectedEventId) {
+      return { success: false, error: 'Wrong event scan', statusCode: 400 };
+    }
+
+    if (verifierRole !== 'admin' && ticket.host_id !== verifierId) {
+      return { success: false, error: 'Unauthorized check-in request', statusCode: 403 };
+    }
+
+    if (ticket.expires_at && Date.parse(ticket.expires_at) < Date.now()) {
+      return { success: false, error: 'Ticket expired', statusCode: 410 };
+    }
+
+    if (ticket.event_status === 'cancelled') {
+      return { success: false, error: 'Event is cancelled', statusCode: 400 };
+    }
+
+
+    if (ticket.status === 'verified') {
+      return { success: true, alreadyCheckedIn: true, ticket: withTicketStatusFields(ticket) };
+    }
+
+    try {
+      db.transaction(() => {
+        const update = db
+          .prepare(
+            `
+              UPDATE tickets
+              SET status = 'verified', verification_status = 'VERIFIED_ATTENDANCE', verified_at = CURRENT_TIMESTAMP, verified_by = ?
+              WHERE id = ? AND status = 'pending'
+            `
+          )
+          .run(verifierId, ticket.id);
+
+        if (update.changes === 0) {
+          throw new Error('VERIFY_CONFLICT');
+        }
+
+        db.prepare('UPDATE bookings SET checked_in = 1, checked_in_at = CURRENT_TIMESTAMP, checked_in_by = ? WHERE id = ? AND checked_in = 0').run(
+          verifierId,
+          ticket.booking_id
+        );
+
+        recordCheckIn(ticket.booking_id, ticket.event_id, verifierId, source);
+      })();
+    } catch (error: any) {
+      if (error?.message === 'VERIFY_CONFLICT') {
+        const latest = withTicketStatusFields(getTicketByTicketId(ticketId));
+        if (latest?.status === 'verified') {
+          return { success: true, alreadyCheckedIn: true, ticket: latest };
+        }
+      }
+      return { success: false, error: 'Failed to verify ticket', statusCode: 500 };
+    }
+
+    const updated = withTicketStatusFields(getTicketByTicketId(ticketId));
+    if (updated) {
+      createNotification(
+        updated.user_id,
+        'ticket_verified',
+        'Attendance verified',
+        `Your attendance for ${updated.event_name} has been verified.`,
+        { eventId: updated.event_id, ticketId: updated.ticket_id },
+        `ticket-verified-${updated.ticket_id}`
+      );
+      broadcastTicketUpdate(updated);
+    }
+
+    return { success: true, ticket: updated };
+  };
+
+  const issueTicketForBooking = async (booking: any, eventDate?: string | null) => {
+    const ticketId = generateTicketId();
+    const expiresAt = buildTicketExpiryIso(eventDate || null);
+    const token = buildTicketToken(
+      {
+        ticketId,
+        eventId: booking.event_id,
+        userId: booking.user_id,
+        bookingRef: booking.booking_ref,
+      },
+      expiresAt
+    );
+    const qrPayload = buildTicketQrPayload(token);
+    const qrCode = await QRCode.toDataURL(qrPayload);
+
+    db.prepare(
+      `
+        INSERT INTO tickets (id, ticket_id, booking_id, user_id, event_id, status, verification_status, issued_at, expires_at, qr_token)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+      `
+    ).run(
+      uuidv4(),
+      ticketId,
+      booking.id,
+      booking.user_id,
+      booking.event_id,
+      booking.checked_in ? 'verified' : 'pending',
+      booking.checked_in ? 'VERIFIED_ATTENDANCE' : 'PENDING_VERIFICATION',
+      expiresAt,
+      token
+    );
+
+    db.prepare('UPDATE bookings SET qr_code = ? WHERE id = ?').run(qrCode, booking.id);
+    return { ticketId, qrCode };
+  };
+
+  const backfillMissingTickets = async () => {
+    const missing = db
+      .prepare(
+        `
+          SELECT b.*, e.date as event_date
+          FROM bookings b
+          JOIN events e ON e.id = b.event_id
+          LEFT JOIN tickets t ON t.booking_id = b.id
+          WHERE t.id IS NULL
+        `
+      )
+      .all() as any[];
+
+    for (const booking of missing) {
+      await issueTicketForBooking(booking, booking.event_date);
+      if (booking.checked_in) {
+        db.prepare("UPDATE tickets SET status = 'verified', verification_status = 'VERIFIED_ATTENDANCE', verified_at = COALESCE(?, CURRENT_TIMESTAMP), verified_by = ? WHERE booking_id = ?")
+          .run(booking.checked_in_at || null, booking.checked_in_by || null, booking.id);
+      }
+    }
   };
 
   const promoteNextWaitlistForEvent = (eventId: string) => {
@@ -554,9 +871,11 @@ async function startServer() {
   const defaultLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
   const authLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 20 });
   const bookingLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 40 });
+  const ticketScanLimiter = rateLimit({ windowMs: 60 * 1000, max: 80 });
   const searchLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 120 });
 
   app.use('/api', defaultLimiter);
+  await backfillMissingTickets();
 
   // Auth
   app.post('/api/auth/login', authLimiter, async (req, res) => {
@@ -2502,28 +2821,252 @@ async function startServer() {
   });
 
   app.get('/api/events/:id/attendees', requireRole('host', 'admin'), (req: AuthedRequest, res) => {
-    const { checkedIn } = req.query;
+    const { checkedIn, verified } = req.query;
     const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id) as any;
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (req.auth!.role !== 'admin' && event.host_id !== req.auth!.userId) return res.status(403).json({ error: 'Unauthorized' });
 
     let query = `
-      SELECT b.*, u.name as user_name, u.email as user_email, tt.name as ticket_type_name
+      SELECT b.*, u.name as user_name, u.email as user_email, tt.name as ticket_type_name,
+              t.ticket_id, t.status as ticket_status, t.verification_status as ticket_verification_status,
+              t.verified_at as ticket_verified_at
       FROM bookings b
       JOIN users u ON u.id = b.user_id
       JOIN ticket_types tt ON tt.id = b.ticket_type_id
+      LEFT JOIN tickets t ON t.booking_id = b.id
       WHERE b.event_id = ?
     `;
     const params: any[] = [req.params.id];
-    if (checkedIn === 'true') {
-      query += ' AND b.checked_in = 1';
-    } else if (checkedIn === 'false') {
-      query += ' AND b.checked_in = 0';
+
+    const normalizedFilter = typeof verified === 'string' ? verified : checkedIn;
+    if (normalizedFilter === 'true' || normalizedFilter === 'verified') {
+      query += " AND t.status = 'verified'";
+    } else if (normalizedFilter === 'false' || normalizedFilter === 'pending') {
+      query += " AND (t.status = 'pending' OR t.status IS NULL)";
     }
     query += ' ORDER BY b.created_at DESC';
 
-    res.json(db.prepare(query).all(...params));
+    const rows = db.prepare(query).all(...params) as any[];
+    res.json(
+      rows.map((row) => ({
+        ...row,
+        ticket_verification_status: toVerificationStatus(row.ticket_verification_status || row.ticket_status),
+        ticket_status: toLegacyTicketStatus(row.ticket_verification_status || row.ticket_status),
+      }))
+    );
   });
+
+  app.get('/api/tickets/user/:userId', requireSelfOrRole('userId', ['admin']), (req, res) => {
+    const rows = db
+      .prepare(
+        `
+          SELECT
+            t.*, b.booking_ref, b.quantity, b.total_price,
+            e.name as event_name, e.date as event_date, e.venue,
+            tt.name as ticket_type_name
+          FROM tickets t
+          JOIN bookings b ON b.id = t.booking_id
+          JOIN events e ON e.id = t.event_id
+          JOIN ticket_types tt ON tt.id = b.ticket_type_id
+          WHERE t.user_id = ?
+          ORDER BY t.issued_at DESC
+        `
+      )
+      .all(req.params.userId);
+
+    return res.json(rows.map((row: any) => withTicketStatusFields(row)));
+  });
+
+  app.get('/api/events/:id/tickets/summary', requireRole('host', 'admin'), (req: AuthedRequest, res) => {
+    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (req.auth!.role !== 'admin' && event.host_id !== req.auth!.userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const stats = db
+      .prepare(
+        `
+          SELECT
+            COUNT(*) as total_registered,
+            SUM(CASE WHEN (t.verification_status = 'VERIFIED_ATTENDANCE' OR t.status = 'verified') THEN 1 ELSE 0 END) as verified_attendees,
+            SUM(CASE WHEN (t.verification_status = 'PENDING_VERIFICATION' OR t.status = 'pending') THEN 1 ELSE 0 END) as pending_attendees
+          FROM tickets t
+          WHERE t.event_id = ?
+        `
+      )
+      .get(req.params.id) as any;
+
+    return res.json({
+      total_registered: Number(stats?.total_registered || 0),
+      verified_attendees: Number(stats?.verified_attendees || 0),
+      pending_attendees: Number(stats?.pending_attendees || 0),
+    });
+  });
+
+  const handleVerifyTicketRequest: express.RequestHandler = (req: AuthedRequest, res) => {
+    const eventId = req.body?.event_id ? String(req.body.event_id) : undefined;
+    const source = req.body?.source === 'manual' ? 'manual' : 'scanner';
+    let ticketId = req.body?.ticketId ? String(req.body.ticketId).trim() : '';
+    let decodedEventId: string | undefined;
+
+    const qrData = req.body?.qrData ? String(req.body.qrData) : '';
+    const explicitToken = req.body?.token ? String(req.body.token) : '';
+
+    if (qrData) {
+      const parsed = parseTicketQrPayload(qrData);
+      if (parsed.legacyBookingRef) {
+        const legacy = getTicketByBookingRef(parsed.legacyBookingRef, eventId);
+        ticketId = legacy?.ticket_id || '';
+      }
+      if (parsed.token) {
+        try {
+          const payload = jwt.verify(parsed.token, JWT_SECRET) as TicketTokenPayload;
+          if (payload.typ !== 'event_ticket' || payload.v !== 1) {
+            return res.status(400).json({ error: 'Invalid QR payload' });
+          }
+          ticketId = payload.ticketId;
+          decodedEventId = payload.eventId;
+        } catch {
+          return res.status(400).json({ error: 'Invalid or tampered QR token' });
+        }
+      }
+    }
+
+    if (explicitToken) {
+      try {
+        const payload = jwt.verify(explicitToken, JWT_SECRET) as TicketTokenPayload;
+        if (payload.typ !== 'event_ticket' || payload.v !== 1) {
+          return res.status(400).json({ error: 'Invalid ticket token' });
+        }
+        ticketId = payload.ticketId;
+        decodedEventId = payload.eventId;
+      } catch {
+        return res.status(400).json({ error: 'Invalid ticket token' });
+      }
+    }
+
+    if (!ticketId) {
+      return res.status(400).json({ error: 'Invalid QR or ticket payload' });
+    }
+
+    if (eventId && decodedEventId && eventId !== decodedEventId) {
+      return res.status(400).json({ error: 'Wrong event scan' });
+    }
+
+    const result = verifyTicketByTicketId(ticketId, req.auth!.userId, req.auth!.role, source, eventId || decodedEventId);
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({ error: result.error });
+    }
+
+    const ticket = withTicketStatusFields(result.ticket);
+    return res.json({ success: true, alreadyCheckedIn: !!result.alreadyCheckedIn, ticket });
+  };
+
+  app.post('/api/tickets/verify', requireRole('host', 'admin'), ticketScanLimiter, handleVerifyTicketRequest);
+
+  const verifyTicketAlias: express.RequestHandler = (req, _res, next) => {
+    req.body = {
+      ...req.body,
+      qrData: req.body?.qrData || req.body?.qrToken || req.body?.token,
+      event_id: req.body?.event_id || req.body?.eventId,
+      ticketId: req.body?.ticketId,
+      source: req.body?.source || 'scanner',
+    };
+    next();
+  };
+
+  app.post('/api/verify-ticket', requireRole('host', 'admin'), ticketScanLimiter, verifyTicketAlias, handleVerifyTicketRequest);
+  app.post('/verify-ticket', requireRole('host', 'admin'), ticketScanLimiter, verifyTicketAlias, handleVerifyTicketRequest);
+
+  app.post('/api/tickets/verify-manual', requireRole('host', 'admin'), ticketScanLimiter, (req: AuthedRequest, res) => {
+    const eventId = String(req.body?.event_id || '').trim();
+    const ticketId = String(req.body?.ticketId || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+
+    if (!eventId) {
+      return res.status(400).json({ error: 'event_id is required' });
+    }
+
+    let resolvedTicketId = ticketId;
+    if (!resolvedTicketId && email) {
+      const byEmail = db
+        .prepare(
+          `
+            SELECT t.ticket_id
+            FROM tickets t
+            JOIN users u ON u.id = t.user_id
+            WHERE t.event_id = ? AND lower(u.email) = ?
+            ORDER BY CASE WHEN t.status = 'pending' THEN 0 ELSE 1 END, t.issued_at DESC
+            LIMIT 1
+          `
+        )
+        .get(eventId, email) as any;
+      resolvedTicketId = byEmail?.ticket_id || '';
+    }
+
+    if (!resolvedTicketId) {
+      return res.status(400).json({ error: 'Provide ticketId or attendee email' });
+    }
+
+    const result = verifyTicketByTicketId(resolvedTicketId, req.auth!.userId, req.auth!.role, 'manual', eventId);
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({ error: result.error });
+    }
+
+    const ticket = withTicketStatusFields(result.ticket);
+    return res.json({ success: true, alreadyCheckedIn: !!result.alreadyCheckedIn, ticket });
+  });
+
+  const handleTicketStatus: express.RequestHandler = (req: AuthedRequest, res) => {
+    const ticketId = String(req.query.ticketId || '').trim();
+    const token = String(req.query.token || '').trim();
+    let resolvedTicketId = ticketId;
+
+    if (!resolvedTicketId && token) {
+      try {
+        const payload = jwt.verify(token, JWT_SECRET) as TicketTokenPayload;
+        if (payload.typ !== 'event_ticket' || payload.v !== 1) {
+          return res.status(400).json({ error: 'Invalid ticket token' });
+        }
+        resolvedTicketId = payload.ticketId;
+      } catch {
+        return res.status(400).json({ error: 'Invalid ticket token' });
+      }
+    }
+
+    if (!resolvedTicketId) {
+      return res.status(400).json({ error: 'ticketId or token is required' });
+    }
+
+    const ticket = withTicketStatusFields(getTicketByTicketId(resolvedTicketId));
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    const requester = req.auth!;
+    const isOwner = requester.userId === ticket.user_id;
+    const isAdmin = requester.role === 'admin';
+    const isHostOwner = requester.role === 'host' && requester.userId === ticket.host_id;
+    if (!isOwner && !isAdmin && !isHostOwner) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    return res.json({
+      ticketId: ticket.ticket_id,
+      eventId: ticket.event_id,
+      userId: ticket.user_id,
+      status: ticket.verification_status,
+      legacyStatus: ticket.status,
+      verifiedAt: ticket.verified_at || null,
+      verifiedBy: ticket.verified_by || null,
+      issuedAt: ticket.issued_at,
+      expiresAt: ticket.expires_at || null,
+    });
+  };
+
+  app.get('/api/ticket-status', requireAuth, handleTicketStatus);
+  app.get('/ticket-status', requireAuth, handleTicketStatus);
 
   app.post('/api/bookings/check-in', requireRole('host', 'admin'), bookingLimiter, (req: AuthedRequest, res) => {
     const { bookingRef, event_id } = req.body;
@@ -2539,28 +3082,15 @@ async function startServer() {
       return res.status(403).json({ error: 'Unauthorized check-in request' });
     }
 
-    const booking = db
-      .prepare(
-        `
-          SELECT b.*, u.name as user_name, tt.name as ticket_type_name
-          FROM bookings b
-          JOIN users u ON u.id = b.user_id
-          JOIN ticket_types tt ON tt.id = b.ticket_type_id
-          WHERE b.booking_ref = ? AND b.event_id = ?
-        `
-      )
-      .get(bookingRef, event_id) as any;
+    const ticket = getTicketByBookingRef(String(bookingRef), String(event_id));
+    if (!ticket?.ticket_id) return res.status(404).json({ error: 'Booking not found for this event' });
 
-    if (!booking) return res.status(404).json({ error: 'Booking not found for this event' });
-
-    if (booking.checked_in) {
-      return res.json({ success: true, alreadyCheckedIn: true, booking });
+    const result = verifyTicketByTicketId(ticket.ticket_id, req.auth!.userId, req.auth!.role, 'scanner', String(event_id));
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({ error: result.error });
     }
 
-    db.prepare('UPDATE bookings SET checked_in = 1, checked_in_at = CURRENT_TIMESTAMP, checked_in_by = ? WHERE id = ?').run(req.auth!.userId, booking.id);
-    recordCheckIn(booking.id, booking.event_id, req.auth!.userId, 'scanner');
-    const updated = db.prepare('SELECT * FROM bookings WHERE id = ?').get(booking.id);
-    res.json({ success: true, booking: updated });
+    return res.json({ success: true, alreadyCheckedIn: !!result.alreadyCheckedIn, ticket: result.ticket });
   });
 
   app.post('/api/bookings/:id/check-in', requireRole('host', 'admin'), bookingLimiter, (req: AuthedRequest, res) => {
@@ -2575,13 +3105,17 @@ async function startServer() {
       return res.status(403).json({ error: 'Unauthorized check-in request' });
     }
 
-    if (booking.checked_in) {
-      return res.json({ success: true, alreadyCheckedIn: true, booking });
+    const ticket = db.prepare('SELECT ticket_id FROM tickets WHERE booking_id = ?').get(booking.id) as any;
+    if (!ticket?.ticket_id) {
+      return res.status(404).json({ error: 'Ticket not found' });
     }
 
-    db.prepare('UPDATE bookings SET checked_in = 1, checked_in_at = CURRENT_TIMESTAMP, checked_in_by = ? WHERE id = ?').run(req.auth!.userId, booking.id);
-    recordCheckIn(booking.id, booking.event_id, req.auth!.userId, 'manual');
-    res.json({ success: true });
+    const result = verifyTicketByTicketId(ticket.ticket_id, req.auth!.userId, req.auth!.role, 'manual', booking.event_id);
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({ error: result.error });
+    }
+
+    return res.json({ success: true, alreadyCheckedIn: !!result.alreadyCheckedIn, ticket: result.ticket });
   });
 
   app.post('/api/check-in', requireRole('host', 'admin'), bookingLimiter, (req: AuthedRequest, res) => {
@@ -2598,19 +3132,17 @@ async function startServer() {
       return res.status(403).json({ error: 'Unauthorized check-in request' });
     }
 
-    const booking = db
-      .prepare('SELECT * FROM bookings WHERE booking_ref = ? AND event_id = ?')
-      .get(bookingRef, event_id) as any;
-    if (!booking) {
+    const ticket = getTicketByBookingRef(String(bookingRef), String(event_id));
+    if (!ticket?.ticket_id) {
       return res.status(404).json({ error: 'Booking not found for this event' });
     }
-    if (booking.checked_in) {
-      return res.status(409).json({ error: 'Already checked in', alreadyCheckedIn: true });
+
+    const result = verifyTicketByTicketId(ticket.ticket_id, req.auth!.userId, req.auth!.role, 'scanner', String(event_id));
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({ error: result.error, alreadyCheckedIn: result.alreadyCheckedIn });
     }
 
-    db.prepare('UPDATE bookings SET checked_in = 1, checked_in_at = CURRENT_TIMESTAMP, checked_in_by = ? WHERE id = ?').run(req.auth!.userId, booking.id);
-    recordCheckIn(booking.id, event_id, req.auth!.userId, 'scanner');
-    return res.json({ success: true, booking_id: booking.id });
+    return res.json({ success: true, alreadyCheckedIn: !!result.alreadyCheckedIn, ticket: result.ticket });
   });
 
   // Promo codes
@@ -2731,7 +3263,18 @@ async function startServer() {
     }
 
     const totalPrice = Math.max(0, baseTotal - discount);
-    const qrCode = await QRCode.toDataURL(booking_ref);
+    const ticketId = generateTicketId();
+    const expiresAt = buildTicketExpiryIso(event.date);
+    const ticketToken = buildTicketToken(
+      {
+        ticketId,
+        eventId: event_id,
+        userId: bookingUserId,
+        bookingRef: booking_ref,
+      },
+      expiresAt
+    );
+    const qrCode = await QRCode.toDataURL(buildTicketQrPayload(ticketToken));
 
     try {
       db.transaction(() => {
@@ -2748,6 +3291,13 @@ async function startServer() {
         db.prepare(
           'INSERT INTO bookings (id, booking_ref, user_id, event_id, ticket_type_id, quantity, total_price, qr_code, referral_code_used, discount_amount, promo_code_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(id, booking_ref, bookingUserId, event_id, ticket_type_id, qty, totalPrice, qrCode, referral_code || null, discount, promoCodeUsed);
+
+        db.prepare(
+          `
+            INSERT INTO tickets (id, ticket_id, booking_id, user_id, event_id, status, verification_status, issued_at, expires_at, qr_token)
+            VALUES (?, ?, ?, ?, ?, 'pending', 'PENDING_VERIFICATION', CURRENT_TIMESTAMP, ?, ?)
+          `
+        ).run(uuidv4(), ticketId, id, bookingUserId, event_id, expiresAt, ticketToken);
 
         if (promoCodeRow) {
           db.prepare('UPDATE promo_codes SET usage_count = usage_count + 1 WHERE id = ?').run(promoCodeRow.id);
@@ -2786,17 +3336,20 @@ async function startServer() {
 
     invalidateEventAnalyticsCache(event_id);
 
-    res.json({ id, booking_ref, qrCode, discount_amount: discount, total_price: totalPrice });
+    res.json({ id, booking_ref, ticket_id: ticketId, qrCode, discount_amount: discount, total_price: totalPrice });
   });
 
   app.get('/api/bookings/user/:userId', requireSelfOrRole('userId', ['admin']), (req, res) => {
     const bookings = db
       .prepare(
         `
-      SELECT b.*, e.name as event_name, e.date as event_date, e.venue, tt.name as ticket_type_name
+      SELECT b.*, e.name as event_name, e.date as event_date, e.venue, tt.name as ticket_type_name,
+             t.ticket_id, t.status as ticket_status, t.issued_at as ticket_issued_at,
+             t.verified_at as ticket_verified_at, t.expires_at as ticket_expires_at
       FROM bookings b
       JOIN events e ON b.event_id = e.id
       JOIN ticket_types tt ON b.ticket_type_id = tt.id
+      LEFT JOIN tickets t ON t.booking_id = b.id
       WHERE b.user_id = ?
       ORDER BY b.created_at DESC
     `
@@ -3267,8 +3820,21 @@ async function startServer() {
     });
   }
 
-  server.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, HOST, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+
+    if (HOST === '0.0.0.0') {
+      const lanAddresses = getLocalIpv4Addresses();
+      lanAddresses.forEach((address) => {
+        console.log(`LAN URL: http://${address}:${PORT}`);
+      });
+
+      if (lanAddresses.length === 0) {
+        console.warn('No LAN IPv4 address detected. Run ipconfig to confirm your active network adapter.');
+      }
+    } else {
+      console.log(`Bound host: ${HOST}`);
+    }
   });
 }
 
