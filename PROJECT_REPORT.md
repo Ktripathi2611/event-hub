@@ -1,5 +1,18 @@
 # EventHub: A Technical Analysis and Project Report
 
+## 📑 Table of Contents
+- [Abstract](#-abstract)
+- [Aim](#-aim)
+- [Objectives](#-objectives)
+- [Methodology](#-methodology)
+    - [1. Technology Stack](#1-technology-stack)
+    - [2. Architectural Design & Flow](#2-architectural-design--flow)
+    - [3. Implementation Strategy](#3-implementation-strategy)
+- [Operational Excellence: Running Seamless Events](#-operational-excellence-running-seamless-events)
+- [Results](#-results)
+- [Conclusion](#-conclusion)
+- [References](#-references)
+
 ## 📄 Abstract
 EventHub is a comprehensive, full-stack event management and attendance tracking platform designed to bridge the gap between event organizers and attendees. The system leverages secure, QR-based ticket verification, real-time data synchronization via WebSockets, and a premium "Nocturnal Architect" design language to provide a seamless user experience. By utilizing a lightweight SQLite database and a high-performance Express.js backend, EventHub offers a scalable solution for managing event lifecycles, from discovery and booking to on-site check-in and post-event analytics.
 
@@ -169,6 +182,27 @@ SponsorshipService->>DB: Save Deal
 SponsorshipService->>Backend: Trigger Notification
 Backend->>Sponsor: Notify Result
 ```
+
+## 🚀 Operational Excellence: Running Seamless Events
+
+EventHub is not just a ticketing tool; it is an operational command center. To run an event "perfectly," organizers can leverage the following system-driven workflows:
+
+### 1. Pre-Event: Frictionless Setup
+-   **Dynamic Tiering**: Hosts should set up multiple ticket tiers (e.g., Early Bird, Regular, VIP) to manage demand and occupancy in real-time.
+-   **Sponsorship Integration**: Secure funding early by listing "Sponsor Spots" in the digital marketplace, allowing sponsors to bid for premium visibility on the event page.
+-   **Community Warm-up**: Start discussion threads in the Event Hub community to build hype and answer FAQs before the gates open.
+
+### 2. Event Day: The "Zero-Queue" Strategy
+-   **Distributed Scanning**: Use multiple devices (Hosts and Staff) logged into the `HostScanner`. The real-time synchronization ensures that a ticket scanned at Gate A is instantly invalidated at Gate B, preventing double-entry and bottlenecks.
+-   **Live Attendance Monitoring**: Monitor the "Attendance Summary" dashboard to see real-time entry rates. If entry is slow, staff can be redirected from Gate A to Gate B based on live data.
+-   **Instant Verification Feedback**: The "Just Verified" banner on the student's phone provides a psychological "green light," speeding up the physical movement of people through checkpoints.
+
+### 3. Post-Event: Data-Driven Growth
+-   **Analytics Review**: Analyze peak check-in times to optimize staffing for future events.
+-   **Sponsor Reporting**: Export sponsorship engagement data to provide high-value metrics to partners, securing long-term collaborations.
+
+> [!TIP]
+> **Pro-Tip for Hosts**: Always keep a printed "Manual Fallback" list (available via the Attendee List export) for areas with poor internet connectivity, though EventHub's lightweight architecture is optimized for low-bandwidth environments.
 
 ## 📊 Results
 The implementation phase yielded a fully functional platform with the following validated outcomes:
