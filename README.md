@@ -520,10 +520,10 @@ The database is seeded with these test accounts:
 
 | Role | Email | Password |
 |------|-------|----------|
-| **Student** | `student@eventhub.com` | `password123` |
-| **Host** | `host@eventhub.com` | `password123` |
-| **Admin** | `admin@eventhub.com` | `password123` |
-| **Sponsor** | `sponsor@eventhub.com` | `password123` |
+| **Student** | `student@college.com` | `admin123` |
+| **Host** | `host@college.com` | `admin123` |
+| **Admin** | `admin@college.com` | `admin123` |
+| **Sponsor** | `sponsor@college.com` | `admin123` |
 
 > ⚠️ These are development-only credentials. Never use in production.
 
